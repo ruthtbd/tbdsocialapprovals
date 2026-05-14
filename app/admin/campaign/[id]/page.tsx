@@ -40,6 +40,8 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
   const [playing, setPlaying] = useState(false)
   const [captured, setCaptured] = useState<string | null>(currentThumb || null)
   const [canCapture, setCanCapture] = useState(false)
+  const [captureError, setCaptureError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -77,14 +79,35 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
   }
 
   function capture() {
+    setCaptureError(null)
     const v = videoRef.current; const c = canvasRef.current
-    if (!v || !c || !canCapture) return
-    c.width = v.videoWidth || 1280
-    c.height = v.videoHeight || 720
-    c.getContext('2d')!.drawImage(v, 0, 0)
-    const dataUrl = c.toDataURL('image/jpeg', 0.92)
-    setCaptured(dataUrl)
-    onCapture(dataUrl)
+    if (!v) { setCaptureError('No video ref'); return }
+    if (!c) { setCaptureError('No canvas ref'); return }
+    if (!canCapture) { setCaptureError('Not ready yet'); return }
+    if (!v.videoWidth) { setCaptureError('Video width is 0'); return }
+    try {
+      c.width = v.videoWidth
+      c.height = v.videoHeight
+      c.getContext('2d')!.drawImage(v, 0, 0)
+      const dataUrl = c.toDataURL('image/jpeg', 0.92)
+      setCaptured(dataUrl)
+      onCapture(dataUrl)
+    } catch (e) {
+      setCaptureError(`Canvas error: ${e}`)
+    }
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const dataUrl = ev.target?.result as string
+      setCaptured(dataUrl)
+      onCapture(dataUrl)
+      setCaptureError(null)
+    }
+    reader.readAsDataURL(file)
   }
 
   return (
@@ -140,7 +163,12 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
             className="w-full cursor-pointer disabled:opacity-30"
             style={{ accentColor: PINK }}
           />
-          <div className="flex items-center gap-3">
+          {captureError && (
+            <p className="text-xs px-3 py-1.5 rounded-lg" style={{ backgroundColor: '#ff6b6b15', color: '#ff6b6b' }}>
+              {captureError}
+            </p>
+          )}
+          <div className="flex items-center gap-3 flex-wrap">
             {captured && (
               <div className="flex items-center gap-2 shrink-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -149,7 +177,7 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
                 <span className="text-xs" style={{ color: PINK }}>Thumbnail set</span>
               </div>
             )}
-            <div className="ml-auto flex gap-2">
+            <div className="ml-auto flex gap-2 flex-wrap">
               {captured && (
                 <button onClick={() => { onCapture(captured); onClose() }}
                   className="px-4 py-2 rounded-full text-sm font-semibold text-black"
@@ -162,6 +190,12 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
                 style={{ border: `1px solid ${PINK}`, color: PINK }}>
                 {captured ? 'Recapture' : 'Capture frame'}
               </button>
+              <button onClick={() => fileInputRef.current?.click()}
+                className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
+                style={{ border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}>
+                Upload image
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
             </div>
           </div>
         </div>
