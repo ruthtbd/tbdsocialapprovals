@@ -41,6 +41,7 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
   const [captured, setCaptured] = useState<string | null>(currentThumb || null)
   const [canCapture, setCanCapture] = useState(false)
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [captureSuccess, setCaptureSuccess] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -78,20 +79,36 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
     else { videoRef.current.play(); setPlaying(true) }
   }
 
-  function capture() {
+  async function capture() {
     setCaptureError(null)
+    setCaptureSuccess(false)
     const v = videoRef.current; const c = canvasRef.current
     if (!v) { setCaptureError('No video ref'); return }
     if (!c) { setCaptureError('No canvas ref'); return }
-    if (!canCapture) { setCaptureError('Not ready yet'); return }
-    if (!v.videoWidth) { setCaptureError('Video width is 0'); return }
+    if (!canCapture) { setCaptureError('Not ready yet — wait for video to load'); return }
+
+    v.pause(); setPlaying(false)
+
+    // Always force a fresh seek so we get a guaranteed decoded frame, even on recapture
+    const targetTime = v.currentTime
+    v.currentTime = targetTime
+    await new Promise<void>(res => {
+      const h = () => { v.removeEventListener('seeked', h); res() }
+      v.addEventListener('seeked', h)
+    })
+
+    if (!v.videoWidth || !v.videoHeight) { setCaptureError('Video dimensions unknown — try scrubbing first'); return }
     try {
       c.width = v.videoWidth
       c.height = v.videoHeight
-      c.getContext('2d')!.drawImage(v, 0, 0)
+      const ctx = c.getContext('2d')
+      if (!ctx) { setCaptureError('Canvas context unavailable'); return }
+      ctx.drawImage(v, 0, 0)
       const dataUrl = c.toDataURL('image/jpeg', 0.92)
       setCaptured(dataUrl)
       onCapture(dataUrl)
+      setCaptureSuccess(true)
+      setTimeout(() => setCaptureSuccess(false), 1500)
     } catch (e) {
       setCaptureError(`Canvas error: ${e}`)
     }
@@ -186,9 +203,9 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
                 </button>
               )}
               <button onClick={capture} disabled={!canCapture}
-                className="px-4 py-2 rounded-full text-sm font-medium transition-colors disabled:opacity-40"
-                style={{ border: `1px solid ${PINK}`, color: PINK }}>
-                {captured ? 'Recapture' : 'Capture frame'}
+                className="px-4 py-2 rounded-full text-sm font-medium transition-all disabled:opacity-40"
+                style={{ border: `1px solid ${PINK}`, color: captureSuccess ? '#000' : PINK, backgroundColor: captureSuccess ? PINK : 'transparent' }}>
+                {captureSuccess ? '✓ Captured!' : captured ? 'Recapture' : 'Capture frame'}
               </button>
               <button onClick={() => fileInputRef.current?.click()}
                 className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
