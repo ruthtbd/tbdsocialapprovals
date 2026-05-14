@@ -32,10 +32,24 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [blobSrc, setBlobSrc] = useState<string | null>(null)
+  const [loadingBlob, setLoadingBlob] = useState(true)
   const [duration, setDuration] = useState(0)
   const [time, setTime] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [captured, setCaptured] = useState<string | null>(currentThumb || null)
+
+  // Fetch video as blob so canvas.drawImage / toDataURL works without CORS issues
+  useEffect(() => {
+    if (src.startsWith('blob:')) { setBlobSrc(src); setLoadingBlob(false); return }
+    setLoadingBlob(true)
+    fetch(src)
+      .then(r => r.blob())
+      .then(blob => { setBlobSrc(URL.createObjectURL(blob)); setLoadingBlob(false) })
+      .catch(() => { setBlobSrc(src); setLoadingBlob(false) })
+    return () => { if (blobSrc && !blobSrc.startsWith('blob:') === false && blobSrc !== src) URL.revokeObjectURL(blobSrc) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src])
 
   function seekTo(t: number) {
     if (videoRef.current) videoRef.current.currentTime = t
@@ -51,13 +65,11 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
   function capture() {
     const v = videoRef.current; const c = canvasRef.current
     if (!v || !c) return
-    try {
-      c.width = v.videoWidth || 1280; c.height = v.videoHeight || 720
-      c.getContext('2d')!.drawImage(v, 0, 0)
-      const dataUrl = c.toDataURL('image/jpeg', 0.92)
-      setCaptured(dataUrl)
-      onCapture(dataUrl)
-    } catch { /* CORS */ }
+    c.width = v.videoWidth || 1280; c.height = v.videoHeight || 720
+    c.getContext('2d')!.drawImage(v, 0, 0)
+    const dataUrl = c.toDataURL('image/jpeg', 0.92)
+    setCaptured(dataUrl)
+    onCapture(dataUrl)
   }
 
   return (
@@ -74,10 +86,14 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
 
         {/* Video — this IS the live preview, no canvas lag */}
         <div className="relative bg-black cursor-pointer" onClick={togglePlay}>
+          {loadingBlob || !blobSrc ? (
+            <div className="w-full h-48 flex items-center justify-center">
+              <div className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: PINK, borderTopColor: 'transparent' }} />
+            </div>
+          ) : (
           <video
             ref={videoRef}
-            src={src}
-            crossOrigin="anonymous"
+            src={blobSrc}
             playsInline
             preload="auto"
             className="w-full max-h-[55vh] object-contain"
@@ -85,15 +101,18 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
             onTimeUpdate={e => setTime((e.target as HTMLVideoElement).currentTime)}
             onEnded={() => setPlaying(false)}
           />
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-            <div className="w-14 h-14 rounded-full flex items-center justify-center"
-              style={{ backgroundColor: 'rgba(246,167,215,0.2)', border: `2px solid ${PINK}` }}>
-              {playing
-                ? <svg viewBox="0 0 24 24" fill={PINK} className="w-6 h-6"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                : <svg viewBox="0 0 24 24" fill={PINK} className="w-6 h-6 ml-1"><path d="M8 5v14l11-7z"/></svg>
-              }
+          )}
+          {!loadingBlob && blobSrc && (
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center"
+                style={{ backgroundColor: 'rgba(246,167,215,0.2)', border: `2px solid ${PINK}` }}>
+                {playing
+                  ? <svg viewBox="0 0 24 24" fill={PINK} className="w-6 h-6"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                  : <svg viewBox="0 0 24 24" fill={PINK} className="w-6 h-6 ml-1"><path d="M8 5v14l11-7z"/></svg>
+                }
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Scrubber + capture */}
@@ -101,7 +120,8 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
           <input
             type="range" min={0} max={duration || 1} step={0.01} value={time}
             onChange={e => seekTo(parseFloat(e.target.value))}
-            className="w-full cursor-pointer"
+            disabled={loadingBlob || !blobSrc}
+            className="w-full cursor-pointer disabled:opacity-30"
             style={{ accentColor: PINK }}
           />
           <div className="flex items-center gap-3">
