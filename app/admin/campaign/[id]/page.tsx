@@ -22,6 +22,71 @@ type EditState = {
 type GridPlatform = 'Instagram' | 'TikTok'
 type PageTab = 'posts' | 'grid'
 
+// ─── Video scrubber (works for both local blob URLs and remote URLs) ───────────
+
+function VideoScrubber({ src, currentThumb, onCapture }: {
+  src: string
+  currentThumb?: string | null
+  onCapture: (dataUrl: string) => void
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [duration, setDuration] = useState(0)
+  const [time, setTime] = useState(0)
+  const [captured, setCaptured] = useState<string | null>(currentThumb || null)
+  const [ready, setReady] = useState(false)
+
+  function seekTo(t: number) {
+    if (videoRef.current) videoRef.current.currentTime = t
+    setTime(t)
+  }
+
+  function capture() {
+    const v = videoRef.current; const c = canvasRef.current
+    if (!v || !c) return
+    try {
+      c.width = v.videoWidth || 320; c.height = v.videoHeight || 240
+      c.getContext('2d')!.drawImage(v, 0, 0)
+      const dataUrl = c.toDataURL('image/jpeg', 0.9)
+      setCaptured(dataUrl)
+      onCapture(dataUrl)
+    } catch { /* CORS — skip */ }
+  }
+
+  return (
+    <div className="mt-3 p-3 rounded-xl space-y-2" style={{ backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+      <canvas ref={canvasRef} className="hidden" />
+      <video ref={videoRef} src={src} muted playsInline preload="metadata" crossOrigin="anonymous" className="hidden"
+        onLoadedMetadata={e => { setDuration((e.target as HTMLVideoElement).duration); setReady(true) }} />
+      <div className="flex items-center gap-3">
+        {captured
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={captured} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" style={{ outline: `2px solid ${PINK}`, outlineOffset: '1px' }} />
+          : <div className="w-12 h-12 rounded-lg bg-white/5 shrink-0 flex items-center justify-center text-white/20 text-xs">?</div>
+        }
+        <div className="flex-1 space-y-1.5">
+          <p className="text-[10px] text-white/30">Scrub to pick thumbnail</p>
+          {ready ? (
+            <input type="range" min={0} max={duration} step={0.05} value={time}
+              onChange={e => seekTo(parseFloat(e.target.value))}
+              className="w-full h-1 rounded-full appearance-none cursor-pointer"
+              style={{ accentColor: PINK }} />
+          ) : (
+            <div className="text-[10px] text-white/20">Loading...</div>
+          )}
+        </div>
+      </div>
+      {ready && (
+        <button type="button" onClick={capture}
+          className="w-full py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style={captured ? { backgroundColor: '#f6a7d720', color: PINK } : { backgroundColor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)' }}>
+          {captured ? '✓ Thumbnail set — capture again to change' : 'Capture frame'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
 
 function EditModal({ state, campaignId, onSave, onClose }: {
@@ -35,6 +100,7 @@ function EditModal({ state, campaignId, onSave, onClose }: {
   const [scheduledDate, setScheduledDate] = useState(state.scheduledDate)
   const [existingAssets, setExistingAssets] = useState(state.existingAssets)
   const [newAssets, setNewAssets] = useState<NewAsset[]>([])
+  const [thumbEdits, setThumbEdits] = useState<Record<string, string>>({}) // assetId → new dataUrl
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -69,6 +135,17 @@ function EditModal({ state, campaignId, onSave, onClose }: {
 
     const removedIds = state.existingAssets.filter(a => !existingAssets.find(e => e.id === a.id)).map(a => a.id)
     if (removedIds.length) await supabase.from('post_assets').delete().in('id', removedIds)
+
+    // Save updated thumbnails for existing assets
+    for (const [assetId, dataUrl] of Object.entries(thumbEdits)) {
+      const asset = existingAssets.find(a => a.id === assetId)
+      if (!asset) continue
+      const blob = await (await fetch(dataUrl)).blob()
+      const thumbPath = `${campaignId}/${state.postId}/${assetId}_thumb.jpg`
+      await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: true })
+      const thumbUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
+      await supabase.from('post_assets').update({ thumbnail_url: thumbUrl }).eq('id', assetId)
+    }
 
     const nextPosition = existingAssets.length
     for (let i = 0; i < newAssets.length; i++) {
@@ -112,49 +189,65 @@ function EditModal({ state, campaignId, onSave, onClose }: {
         <div className="overflow-y-auto p-6 space-y-5">
           <div>
             <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Assets</p>
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-3 flex-wrap">
               {existingAssets.map((a, i) => (
-                <div key={a.id} className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5 shrink-0">
-                  {a.file_type === 'video'
-                    ? a.thumbnail_url
+                <div key={a.id} className="shrink-0">
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5">
+                    {a.file_type === 'video'
+                      ? (thumbEdits[a.id] || a.thumbnail_url)
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={thumbEdits[a.id] || a.thumbnail_url!} alt="" className="w-full h-full object-cover" />
+                        : <video src={a.file_url} className="w-full h-full object-cover" muted preload="metadata" />
                       // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={a.thumbnail_url} alt="" className="w-full h-full object-cover" />
-                      : <video src={a.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                    // eslint-disable-next-line @next/next/no-img-element
-                    : <img src={a.file_url} alt="" className="w-full h-full object-cover" />
-                  }
-                  {i === 0 && totalAssets > 1 && (
-                    <span className="absolute bottom-0 left-0 right-0 text-center text-white text-[9px] bg-black/60 py-0.5">cover</span>
+                      : <img src={a.file_url} alt="" className="w-full h-full object-cover" />
+                    }
+                    {i === 0 && totalAssets > 1 && (
+                      <span className="absolute bottom-0 left-0 right-0 text-center text-white text-[9px] bg-black/60 py-0.5">cover</span>
+                    )}
+                    <button onClick={() => setExistingAssets(prev => prev.filter(x => x.id !== a.id))}
+                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
+                  </div>
+                  {a.file_type === 'video' && (
+                    <VideoScrubber
+                      src={a.file_url}
+                      currentThumb={thumbEdits[a.id] || a.thumbnail_url}
+                      onCapture={dataUrl => setThumbEdits(prev => ({ ...prev, [a.id]: dataUrl }))}
+                    />
                   )}
-                  <button onClick={() => setExistingAssets(prev => prev.filter(x => x.id !== a.id))}
-                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
                 </div>
               ))}
               {newAssets.map(a => (
-                <div key={a.id} className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5 shrink-0">
-                  {a.fileType === 'video'
-                    ? a.thumbnailDataUrl
+                <div key={a.id} className="shrink-0">
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5">
+                    {a.fileType === 'video'
+                      ? a.thumbnailDataUrl
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={a.thumbnailDataUrl} alt="" className="w-full h-full object-cover" />
+                        : <video src={a.preview} className="w-full h-full object-cover" muted preload="metadata" />
                       // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={a.thumbnailDataUrl} alt="" className="w-full h-full object-cover" />
-                      : <video src={a.preview} className="w-full h-full object-cover" muted preload="metadata" />
-                    // eslint-disable-next-line @next/next/no-img-element
-                    : <img src={a.preview} alt="" className="w-full h-full object-cover" />
-                  }
-                  <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full" style={{ backgroundColor: PINK }} />
-                  <button onClick={() => setNewAssets(prev => prev.filter(x => x.id !== a.id))}
-                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
+                      : <img src={a.preview} alt="" className="w-full h-full object-cover" />
+                    }
+                    <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full" style={{ backgroundColor: PINK }} />
+                    <button onClick={() => setNewAssets(prev => prev.filter(x => x.id !== a.id))}
+                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
+                  </div>
+                  {a.fileType === 'video' && (
+                    <VideoScrubber
+                      src={a.preview}
+                      currentThumb={a.thumbnailDataUrl}
+                      onCapture={dataUrl => setNewAssets(prev => prev.map(x => x.id === a.id ? { ...x, thumbnailDataUrl: dataUrl } : x))}
+                    />
+                  )}
                 </div>
               ))}
-              {totalAssets < 5 && (
-                <button onClick={() => fileRef.current?.click()}
-                  className="w-16 h-16 rounded-lg border border-dashed flex items-center justify-center shrink-0"
-                  style={{ borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.3)' }}>
-                  <span className="text-xl leading-none">+</span>
-                </button>
-              )}
-              <input ref={fileRef} type="file" multiple accept="image/*,video/*" className="hidden"
-                onChange={e => addFiles(e.target.files)} />
             </div>
+            <button onClick={() => fileRef.current?.click()}
+              className="mt-3 text-xs px-3 py-1.5 rounded-full border transition-colors"
+              style={{ borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.4)' }}>
+              + Add asset
+            </button>
+            <input ref={fileRef} type="file" multiple accept="image/*,video/*" className="hidden"
+              onChange={e => addFiles(e.target.files)} />
             {newAssets.length > 0 && <p className="text-xs mt-2" style={{ color: PINK }}>· {newAssets.length} new file{newAssets.length !== 1 ? 's' : ''} to upload</p>}
           </div>
           <div>
