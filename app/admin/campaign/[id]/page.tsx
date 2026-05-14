@@ -22,67 +22,116 @@ type EditState = {
 type GridPlatform = 'Instagram' | 'TikTok'
 type PageTab = 'posts' | 'grid'
 
-// ─── Video scrubber (works for both local blob URLs and remote URLs) ───────────
+// ─── Video thumbnail modal — large scrubber with live video preview ────────────
 
-function VideoScrubber({ src, currentThumb, onCapture }: {
+function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
   src: string
   currentThumb?: string | null
   onCapture: (dataUrl: string) => void
+  onClose: () => void
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [duration, setDuration] = useState(0)
   const [time, setTime] = useState(0)
+  const [playing, setPlaying] = useState(false)
   const [captured, setCaptured] = useState<string | null>(currentThumb || null)
-  const [ready, setReady] = useState(false)
 
   function seekTo(t: number) {
     if (videoRef.current) videoRef.current.currentTime = t
     setTime(t)
   }
 
+  function togglePlay() {
+    if (!videoRef.current) return
+    if (playing) { videoRef.current.pause(); setPlaying(false) }
+    else { videoRef.current.play(); setPlaying(true) }
+  }
+
   function capture() {
     const v = videoRef.current; const c = canvasRef.current
     if (!v || !c) return
     try {
-      c.width = v.videoWidth || 320; c.height = v.videoHeight || 240
+      c.width = v.videoWidth || 1280; c.height = v.videoHeight || 720
       c.getContext('2d')!.drawImage(v, 0, 0)
-      const dataUrl = c.toDataURL('image/jpeg', 0.9)
+      const dataUrl = c.toDataURL('image/jpeg', 0.92)
       setCaptured(dataUrl)
       onCapture(dataUrl)
-    } catch { /* CORS — skip */ }
+    } catch { /* CORS */ }
   }
 
   return (
-    <div className="mt-3 p-3 rounded-xl space-y-2" style={{ backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-      <canvas ref={canvasRef} className="hidden" />
-      <video ref={videoRef} src={src} muted playsInline preload="metadata" crossOrigin="anonymous" className="hidden"
-        onLoadedMetadata={e => { setDuration((e.target as HTMLVideoElement).duration); setReady(true) }} />
-      <div className="flex items-center gap-3">
-        {captured
-          // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={captured} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" style={{ outline: `2px solid ${PINK}`, outlineOffset: '1px' }} />
-          : <div className="w-12 h-12 rounded-lg bg-white/5 shrink-0 flex items-center justify-center text-white/20 text-xs">?</div>
-        }
-        <div className="flex-1 space-y-1.5">
-          <p className="text-[10px] text-white/30">Scrub to pick thumbnail</p>
-          {ready ? (
-            <input type="range" min={0} max={duration} step={0.05} value={time}
-              onChange={e => seekTo(parseFloat(e.target.value))}
-              className="w-full h-1 rounded-full appearance-none cursor-pointer"
-              style={{ accentColor: PINK }} />
-          ) : (
-            <div className="text-[10px] text-white/20">Loading...</div>
-          )}
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(8px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="w-full max-w-2xl rounded-2xl overflow-hidden"
+        style={{ backgroundColor: '#0a0a0a', border: '1px solid rgba(255,255,255,0.12)' }}>
+
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10">
+          <h3 className="text-sm font-semibold text-white">Pick thumbnail</h3>
+          <button onClick={onClose} className="text-white/40 hover:text-white transition-colors text-xl leading-none">✕</button>
         </div>
+
+        {/* Video — this IS the live preview, no canvas lag */}
+        <div className="relative bg-black cursor-pointer" onClick={togglePlay}>
+          <video
+            ref={videoRef}
+            src={src}
+            crossOrigin="anonymous"
+            playsInline
+            preload="auto"
+            className="w-full max-h-[55vh] object-contain"
+            onLoadedMetadata={e => setDuration((e.target as HTMLVideoElement).duration)}
+            onTimeUpdate={e => setTime((e.target as HTMLVideoElement).currentTime)}
+            onEnded={() => setPlaying(false)}
+          />
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+            <div className="w-14 h-14 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: 'rgba(246,167,215,0.2)', border: `2px solid ${PINK}` }}>
+              {playing
+                ? <svg viewBox="0 0 24 24" fill={PINK} className="w-6 h-6"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                : <svg viewBox="0 0 24 24" fill={PINK} className="w-6 h-6 ml-1"><path d="M8 5v14l11-7z"/></svg>
+              }
+            </div>
+          </div>
+        </div>
+
+        {/* Scrubber + capture */}
+        <div className="p-5 space-y-4">
+          <input
+            type="range" min={0} max={duration || 1} step={0.01} value={time}
+            onChange={e => seekTo(parseFloat(e.target.value))}
+            className="w-full cursor-pointer"
+            style={{ accentColor: PINK }}
+          />
+          <div className="flex items-center gap-3">
+            {captured && (
+              <div className="flex items-center gap-2 shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={captured} alt="" className="w-14 h-10 rounded-lg object-cover"
+                  style={{ outline: `2px solid ${PINK}`, outlineOffset: '1px' }} />
+                <span className="text-xs" style={{ color: PINK }}>Thumbnail set</span>
+              </div>
+            )}
+            <div className="ml-auto flex gap-2">
+              {captured && (
+                <button onClick={() => { onCapture(captured); onClose() }}
+                  className="px-4 py-2 rounded-full text-sm font-semibold text-black"
+                  style={{ backgroundColor: PINK }}>
+                  Done
+                </button>
+              )}
+              <button onClick={capture}
+                className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
+                style={{ border: `1px solid ${PINK}`, color: PINK }}>
+                {captured ? 'Recapture' : 'Capture frame'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <canvas ref={canvasRef} className="hidden" />
       </div>
-      {ready && (
-        <button type="button" onClick={capture}
-          className="w-full py-1.5 rounded-lg text-xs font-medium transition-colors"
-          style={captured ? { backgroundColor: '#f6a7d720', color: PINK } : { backgroundColor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)' }}>
-          {captured ? '✓ Thumbnail set — capture again to change' : 'Capture frame'}
-        </button>
-      )}
     </div>
   )
 }
@@ -101,6 +150,7 @@ function EditModal({ state, campaignId, onSave, onClose }: {
   const [existingAssets, setExistingAssets] = useState(state.existingAssets)
   const [newAssets, setNewAssets] = useState<NewAsset[]>([])
   const [thumbEdits, setThumbEdits] = useState<Record<string, string>>({}) // assetId → new dataUrl
+  const [thumbPickerAsset, setThumbPickerAsset] = useState<{ id: string; src: string; current?: string | null } | null>(null)
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -177,6 +227,23 @@ function EditModal({ state, campaignId, onSave, onClose }: {
   }
 
   return (
+    <>
+    {thumbPickerAsset && (
+      <ThumbnailPickerModal
+        src={thumbPickerAsset.src}
+        currentThumb={thumbPickerAsset.current}
+        onCapture={dataUrl => {
+          const id = thumbPickerAsset.id
+          // Check if it's an existing or new asset
+          if (existingAssets.find(a => a.id === id)) {
+            setThumbEdits(prev => ({ ...prev, [id]: dataUrl }))
+          } else {
+            setNewAssets(prev => prev.map(a => a.id === id ? { ...a, thumbnailDataUrl: dataUrl } : a))
+          }
+        }}
+        onClose={() => setThumbPickerAsset(null)}
+      />
+    )}
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -208,11 +275,11 @@ function EditModal({ state, campaignId, onSave, onClose }: {
                       className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
                   </div>
                   {a.file_type === 'video' && (
-                    <VideoScrubber
-                      src={a.file_url}
-                      currentThumb={thumbEdits[a.id] || a.thumbnail_url}
-                      onCapture={dataUrl => setThumbEdits(prev => ({ ...prev, [a.id]: dataUrl }))}
-                    />
+                    <button onClick={() => setThumbPickerAsset({ id: a.id, src: a.file_url, current: thumbEdits[a.id] || a.thumbnail_url })}
+                      className="mt-1 w-16 text-[10px] py-0.5 rounded text-center transition-colors"
+                      style={thumbEdits[a.id] ? { color: PINK } : { color: 'rgba(255,255,255,0.35)' }}>
+                      {thumbEdits[a.id] ? '✓ thumb' : '+ thumb'}
+                    </button>
                   )}
                 </div>
               ))}
@@ -232,11 +299,11 @@ function EditModal({ state, campaignId, onSave, onClose }: {
                       className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
                   </div>
                   {a.fileType === 'video' && (
-                    <VideoScrubber
-                      src={a.preview}
-                      currentThumb={a.thumbnailDataUrl}
-                      onCapture={dataUrl => setNewAssets(prev => prev.map(x => x.id === a.id ? { ...x, thumbnailDataUrl: dataUrl } : x))}
-                    />
+                    <button onClick={() => setThumbPickerAsset({ id: a.id, src: a.preview, current: a.thumbnailDataUrl })}
+                      className="mt-1 w-16 text-[10px] py-0.5 rounded text-center transition-colors"
+                      style={a.thumbnailDataUrl ? { color: PINK } : { color: 'rgba(255,255,255,0.35)' }}>
+                      {a.thumbnailDataUrl ? '✓ thumb' : '+ thumb'}
+                    </button>
                   )}
                 </div>
               ))}
@@ -288,6 +355,7 @@ function EditModal({ state, campaignId, onSave, onClose }: {
         </div>
       </div>
     </div>
+    </>
   )
 }
 
