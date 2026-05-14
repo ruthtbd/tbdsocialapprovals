@@ -1,14 +1,81 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+
+const PINK = '#f6a7d7'
 
 type AssetDraft = {
   id: string
   file: File
   preview: string
   fileType: 'image' | 'video'
+  thumbnailDataUrl?: string
+}
+
+function VideoFramePicker({ src, onSelect, selected }: { src: string; onSelect: (dataUrl: string) => void; selected?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [duration, setDuration] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [ready, setReady] = useState(false)
+
+  function seekTo(t: number) {
+    if (!videoRef.current) return
+    videoRef.current.currentTime = t
+    setCurrentTime(t)
+  }
+
+  function capture() {
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas) return
+    canvas.width = video.videoWidth || 320
+    canvas.height = video.videoHeight || 240
+    canvas.getContext('2d')!.drawImage(video, 0, 0)
+    onSelect(canvas.toDataURL('image/jpeg', 0.9))
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5" style={{ width: 64 }}>
+      <canvas ref={canvasRef} className="hidden" />
+      <video
+        ref={videoRef}
+        src={src}
+        muted
+        playsInline
+        preload="metadata"
+        className="hidden"
+        onLoadedMetadata={e => { setDuration((e.target as HTMLVideoElement).duration); setReady(true) }}
+      />
+      {ready && (
+        <>
+          <p className="text-[10px] text-white/30">Thumbnail</p>
+          <input
+            type="range"
+            min={0}
+            max={duration}
+            step={0.05}
+            value={currentTime}
+            onChange={e => seekTo(parseFloat(e.target.value))}
+            className="w-full h-1 rounded-full appearance-none cursor-pointer"
+            style={{ accentColor: PINK }}
+          />
+          <button
+            type="button"
+            onClick={capture}
+            className="w-full text-[10px] py-1 rounded-md transition-colors font-medium"
+            style={selected
+              ? { backgroundColor: '#f6a7d720', color: PINK }
+              : { backgroundColor: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)' }
+            }>
+            {selected ? '✓ Set' : 'Capture'}
+          </button>
+        </>
+      )}
+    </div>
+  )
 }
 
 type PostDraft = {
@@ -188,10 +255,20 @@ export default function NewCampaignPage() {
 
         const { data: { publicUrl } } = supabase.storage.from('posts').getPublicUrl(path)
 
+        // Upload video thumbnail if one was selected
+        let thumbnailUrl: string | null = null
+        if (asset.fileType === 'video' && asset.thumbnailDataUrl) {
+          const blob = await (await fetch(asset.thumbnailDataUrl)).blob()
+          const thumbPath = `${campaign.id}/${postRecord.id}/${asset.id}_thumb.jpg`
+          const { error: te } = await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600' })
+          if (!te) thumbnailUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
+        }
+
         await supabase.from('post_assets').insert({
           post_id: postRecord.id,
           file_url: publicUrl,
           file_type: asset.fileType,
+          thumbnail_url: thumbnailUrl,
           position: j,
         })
       }
@@ -268,24 +345,38 @@ export default function NewCampaignPage() {
                   {/* Asset thumbnails */}
                   <div className="flex gap-2 flex-wrap">
                     {post.assets.map((asset, aIdx) => (
-                      <div key={asset.id} className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5 shrink-0">
-                        {asset.fileType === 'video'
-                          ? <video src={asset.preview} className="w-full h-full object-cover" muted />
-                          // eslint-disable-next-line @next/next/no-img-element
-                          : <img src={asset.preview} alt="" className="w-full h-full object-cover" />
-                        }
-                        {aIdx === 0 && post.assets.length > 1 && (
-                          <span className="absolute bottom-0 left-0 right-0 text-center text-white text-[9px] bg-black/60 py-0.5">cover</span>
-                        )}
+                      <div key={asset.id} className="shrink-0">
+                        <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5">
+                          {asset.fileType === 'video'
+                            ? asset.thumbnailDataUrl
+                              // eslint-disable-next-line @next/next/no-img-element
+                              ? <img src={asset.thumbnailDataUrl} alt="" className="w-full h-full object-cover" />
+                              : <video src={asset.preview} className="w-full h-full object-cover" muted preload="metadata" />
+                            // eslint-disable-next-line @next/next/no-img-element
+                            : <img src={asset.preview} alt="" className="w-full h-full object-cover" />
+                          }
+                          {aIdx === 0 && post.assets.length > 1 && (
+                            <span className="absolute bottom-0 left-0 right-0 text-center text-white text-[9px] bg-black/60 py-0.5">cover</span>
+                          )}
+                          {asset.fileType === 'video' && !asset.thumbnailDataUrl && (
+                            <div className="absolute top-1 left-1">
+                              <svg viewBox="0 0 24 24" fill="white" className="w-3 h-3"><path d="M8 5v14l11-7z" /></svg>
+                            </div>
+                          )}
+                          <button type="button" onClick={() => removeAsset(post.id, asset.id)}
+                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px] leading-none">
+                            ✕
+                          </button>
+                        </div>
                         {asset.fileType === 'video' && (
-                          <div className="absolute top-1 left-1">
-                            <svg viewBox="0 0 24 24" fill="white" className="w-3 h-3"><path d="M8 5v14l11-7z" /></svg>
-                          </div>
+                          <VideoFramePicker
+                            src={asset.preview}
+                            selected={asset.thumbnailDataUrl}
+                            onSelect={dataUrl => setPosts(p => p.map(x => x.id === post.id ? {
+                              ...x, assets: x.assets.map(a => a.id === asset.id ? { ...a, thumbnailDataUrl: dataUrl } : a)
+                            } : x))}
+                          />
                         )}
-                        <button type="button" onClick={() => removeAsset(post.id, asset.id)}
-                          className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px] leading-none">
-                          ✕
-                        </button>
                       </div>
                     ))}
 

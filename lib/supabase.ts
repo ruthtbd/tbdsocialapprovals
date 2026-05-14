@@ -46,6 +46,7 @@ export type PostAsset = {
   post_id: string
   file_url: string
   file_type: 'image' | 'video'
+  thumbnail_url: string | null
   position: number
   created_at: string
 }

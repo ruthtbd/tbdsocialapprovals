@@ -120,13 +120,6 @@ function GridPreview({ posts, theme }: { posts: MockPost[]; theme: Theme }) {
                   <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full shadow" style={{
                     backgroundColor: post.status === 'approved' ? PINK : post.status === 'changes_requested' ? '#ff6b6b' : 'rgba(255,255,255,0.5)'
                   }} />
-                  {isCarousel && (
-                    <div className="absolute top-1.5 left-1.5">
-                      <svg viewBox="0 0 24 24" fill="white" className="w-3.5 h-3.5 drop-shadow">
-                        <path d="M2 6h2v12H2V6zm3-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm14 2H5v12h14V6zm3 2h2v8h-2V8z" />
-                      </svg>
-                    </div>
-                  )}
                 </div>
                 {post.scheduled_date && (
                   <p className="text-center mt-1 text-xs" style={{ color: theme.faint }}>{formatDate(post.scheduled_date)}</p>

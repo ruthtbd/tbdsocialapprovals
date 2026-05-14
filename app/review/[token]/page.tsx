@@ -127,7 +127,8 @@ function GridPreview({ posts, theme }: { posts: PostWithUI[]; theme: Theme }) {
                 <div className="aspect-[3/4] overflow-hidden rounded-sm relative" style={{ backgroundColor: theme.mediaBg }}>
                   {cover ? (
                     cover.file_type === 'video'
-                      ? <video src={cover.file_url} className="w-full h-full object-cover" muted playsInline />
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? cover.thumbnail_url ? <img src={cover.thumbnail_url} alt="" className="w-full h-full object-cover" /> : <video src={cover.file_url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                       // eslint-disable-next-line @next/next/no-img-element
                       : <img src={cover.file_url} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -139,16 +140,7 @@ function GridPreview({ posts, theme }: { posts: PostWithUI[]; theme: Theme }) {
                     backgroundColor: post.status === 'approved' ? PINK : post.status === 'changes_requested' ? '#ff6b6b' : 'rgba(255,255,255,0.5)'
                   }} />
 
-                  {/* Carousel icon */}
-                  {isCarousel && (
-                    <div className="absolute top-1.5 left-1.5">
-                      <svg viewBox="0 0 24 24" fill="white" className="w-3.5 h-3.5 drop-shadow">
-                        <path d="M2 6h2v12H2V6zm3-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm14 2H5v12h14V6zm3 2h2v8h-2V8z" />
-                      </svg>
-                    </div>
-                  )}
-
-                  {/* Video icon */}
+                  {/* Video icon — single video posts only */}
                   {!isCarousel && cover?.file_type === 'video' && (
                     <div className="absolute bottom-1.5 left-1.5">
                       <svg viewBox="0 0 24 24" fill="white" className="w-3.5 h-3.5 drop-shadow"><path d="M8 5v14l11-7z" /></svg>

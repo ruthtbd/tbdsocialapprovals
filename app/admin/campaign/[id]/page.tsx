@@ -9,8 +9,7 @@ import { supabase } from '@/lib/supabase'
 const PLATFORMS = ['Instagram', 'TikTok', 'Facebook', 'LinkedIn', 'Twitter/X', 'YouTube', 'Other']
 const PINK = '#f6a7d7'
 
-type NewAsset = { id: string; file: File; preview: string; fileType: 'image' | 'video' }
-
+type NewAsset = { id: string; file: File; preview: string; fileType: 'image' | 'video'; thumbnailDataUrl?: string }
 type EditState = {
   postId: string
   caption: string
@@ -20,6 +19,10 @@ type EditState = {
   newAssets: NewAsset[]
   saving: boolean
 }
+type GridPlatform = 'Instagram' | 'TikTok'
+type PageTab = 'posts' | 'grid'
+
+// ─── Edit Modal ───────────────────────────────────────────────────────────────
 
 function EditModal({ state, campaignId, onSave, onClose }: {
   state: EditState
@@ -52,20 +55,10 @@ function EditModal({ state, campaignId, onSave, onClose }: {
     setNewAssets(prev => [...prev, ...added])
   }
 
-  function removeExisting(assetId: string) {
-    setExistingAssets(prev => prev.filter(a => a.id !== assetId))
-  }
-
-  function removeNew(assetId: string) {
-    setNewAssets(prev => prev.filter(a => a.id !== assetId))
-  }
-
   const totalAssets = existingAssets.length + newAssets.length
 
   async function handleSave() {
     setSaving(true)
-
-    // Update post fields
     await supabase.from('posts').update({
       caption: caption || null,
       platform: platforms.length > 0 ? JSON.stringify(platforms) : null,
@@ -74,13 +67,9 @@ function EditModal({ state, campaignId, onSave, onClose }: {
       feedback: null,
     }).eq('id', state.postId)
 
-    // Delete removed existing assets
     const removedIds = state.existingAssets.filter(a => !existingAssets.find(e => e.id === a.id)).map(a => a.id)
-    if (removedIds.length) {
-      await supabase.from('post_assets').delete().in('id', removedIds)
-    }
+    if (removedIds.length) await supabase.from('post_assets').delete().in('id', removedIds)
 
-    // Upload new assets
     const nextPosition = existingAssets.length
     for (let i = 0; i < newAssets.length; i++) {
       const asset = newAssets[i]
@@ -89,20 +78,24 @@ function EditModal({ state, campaignId, onSave, onClose }: {
       const { error } = await supabase.storage.from('posts').upload(path, asset.file, { cacheControl: '3600', upsert: false })
       if (error) continue
       const { data: { publicUrl } } = supabase.storage.from('posts').getPublicUrl(path)
+
+      let thumbnailUrl: string | null = null
+      if (asset.fileType === 'video' && asset.thumbnailDataUrl) {
+        const blob = await (await fetch(asset.thumbnailDataUrl)).blob()
+        const thumbPath = `${campaignId}/${state.postId}/${asset.id}_thumb.jpg`
+        const { error: te } = await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600' })
+        if (!te) thumbnailUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
+      }
+
       await supabase.from('post_assets').insert({
-        post_id: state.postId,
-        file_url: publicUrl,
-        file_type: asset.fileType,
-        position: nextPosition + i,
+        post_id: state.postId, file_url: publicUrl, file_type: asset.fileType,
+        thumbnail_url: thumbnailUrl, position: nextPosition + i,
       })
     }
 
-    // Reload updated post
     const { data: updatedPost } = await supabase.from('posts').select('*').eq('id', state.postId).single()
     const { data: updatedAssets } = await supabase.from('post_assets').select('*').eq('post_id', state.postId).order('position')
-    if (updatedPost) {
-      onSave({ ...updatedPost, assets: updatedAssets || [] })
-    }
+    if (updatedPost) onSave({ ...updatedPost, assets: updatedAssets || [] })
     setSaving(false)
   }
 
@@ -112,53 +105,49 @@ function EditModal({ state, campaignId, onSave, onClose }: {
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-full max-w-lg rounded-3xl overflow-hidden max-h-[90vh] flex flex-col"
         style={{ backgroundColor: '#0d0d0d', border: '1px solid rgba(255,255,255,0.1)' }}>
-
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
           <h2 className="font-semibold text-white">Edit post</h2>
           <button onClick={onClose} className="text-white/40 hover:text-white transition-colors text-xl leading-none">✕</button>
         </div>
-
-        {/* Body */}
         <div className="overflow-y-auto p-6 space-y-5">
-
-          {/* Assets */}
           <div>
             <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Assets</p>
             <div className="flex gap-2 flex-wrap">
               {existingAssets.map((a, i) => (
                 <div key={a.id} className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5 shrink-0">
                   {a.file_type === 'video'
-                    ? <video src={a.file_url} className="w-full h-full object-cover" muted />
+                    ? a.thumbnail_url
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={a.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                      : <video src={a.file_url} className="w-full h-full object-cover" muted preload="metadata" />
                     // eslint-disable-next-line @next/next/no-img-element
                     : <img src={a.file_url} alt="" className="w-full h-full object-cover" />
                   }
                   {i === 0 && totalAssets > 1 && (
                     <span className="absolute bottom-0 left-0 right-0 text-center text-white text-[9px] bg-black/60 py-0.5">cover</span>
                   )}
-                  <button onClick={() => removeExisting(a.id)}
-                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">
-                    ✕
-                  </button>
+                  <button onClick={() => setExistingAssets(prev => prev.filter(x => x.id !== a.id))}
+                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
                 </div>
               ))}
               {newAssets.map(a => (
                 <div key={a.id} className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5 shrink-0">
                   {a.fileType === 'video'
-                    ? <video src={a.preview} className="w-full h-full object-cover" muted />
+                    ? a.thumbnailDataUrl
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={a.thumbnailDataUrl} alt="" className="w-full h-full object-cover" />
+                      : <video src={a.preview} className="w-full h-full object-cover" muted preload="metadata" />
                     // eslint-disable-next-line @next/next/no-img-element
                     : <img src={a.preview} alt="" className="w-full h-full object-cover" />
                   }
                   <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full" style={{ backgroundColor: PINK }} />
-                  <button onClick={() => removeNew(a.id)}
-                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">
-                    ✕
-                  </button>
+                  <button onClick={() => setNewAssets(prev => prev.filter(x => x.id !== a.id))}
+                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
                 </div>
               ))}
               {totalAssets < 5 && (
                 <button onClick={() => fileRef.current?.click()}
-                  className="w-16 h-16 rounded-lg border border-dashed flex items-center justify-center shrink-0 transition-colors"
+                  className="w-16 h-16 rounded-lg border border-dashed flex items-center justify-center shrink-0"
                   style={{ borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.3)' }}>
                   <span className="text-xl leading-none">+</span>
                 </button>
@@ -166,20 +155,14 @@ function EditModal({ state, campaignId, onSave, onClose }: {
               <input ref={fileRef} type="file" multiple accept="image/*,video/*" className="hidden"
                 onChange={e => addFiles(e.target.files)} />
             </div>
-            {newAssets.length > 0 && (
-              <p className="text-xs mt-2" style={{ color: PINK }}>· {newAssets.length} new file{newAssets.length !== 1 ? 's' : ''} to upload</p>
-            )}
+            {newAssets.length > 0 && <p className="text-xs mt-2" style={{ color: PINK }}>· {newAssets.length} new file{newAssets.length !== 1 ? 's' : ''} to upload</p>}
           </div>
-
-          {/* Scheduled date */}
           <div>
             <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Scheduled date</p>
             <input type="date" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#f6a7d7] transition-colors"
               style={{ colorScheme: 'dark' }} />
           </div>
-
-          {/* Platforms */}
           <div>
             <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Platforms</p>
             <div className="flex flex-wrap gap-1.5">
@@ -193,8 +176,6 @@ function EditModal({ state, campaignId, onSave, onClose }: {
               ))}
             </div>
           </div>
-
-          {/* Caption */}
           <div>
             <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Caption</p>
             <textarea value={caption} onChange={e => setCaption(e.target.value)}
@@ -202,14 +183,10 @@ function EditModal({ state, campaignId, onSave, onClose }: {
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#f6a7d7] transition-colors resize-none" />
           </div>
         </div>
-
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-white/10 flex gap-3">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 py-2.5 rounded-full text-sm font-medium transition-colors disabled:opacity-40"
-            style={{ border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}>
-            Cancel
-          </button>
+            className="flex-1 py-2.5 rounded-full text-sm font-medium disabled:opacity-40"
+            style={{ border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}>Cancel</button>
           <button onClick={handleSave} disabled={saving || totalAssets === 0}
             className="flex-1 py-2.5 rounded-full text-sm font-semibold text-black transition-opacity hover:opacity-80 disabled:opacity-40"
             style={{ backgroundColor: PINK }}>
@@ -221,6 +198,129 @@ function EditModal({ state, campaignId, onSave, onClose }: {
   )
 }
 
+// ─── Drag-and-drop Grid ───────────────────────────────────────────────────────
+
+function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (posts: PostWithAssets[]) => void }) {
+  const [platform, setPlatform] = useState<GridPlatform>('Instagram')
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [overIdx, setOverIdx] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const filtered = [...posts]
+    .filter(p => parsePlatforms(p.platform).includes(platform))
+    .sort((a, b) => {
+      if (!a.scheduled_date && !b.scheduled_date) return 0
+      if (!a.scheduled_date) return 1
+      if (!b.scheduled_date) return -1
+      return new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime()
+    })
+
+  async function handleDrop(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return
+
+    // Dates stay in their slots — posts move between them
+    const dates = filtered.map(p => p.scheduled_date)
+    const reordered = [...filtered]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    const updates = reordered.map((p, i) => ({ id: p.id, date: dates[i] ?? null }))
+
+    setSaving(true)
+    await Promise.all(updates.map(u =>
+      supabase.from('posts').update({ scheduled_date: u.date }).eq('id', u.id)
+    ))
+    setSaving(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+
+    onUpdate(posts.map(p => {
+      const u = updates.find(x => x.id === p.id)
+      return u ? { ...p, scheduled_date: u.date } : p
+    }))
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2">
+          {(['Instagram', 'TikTok'] as GridPlatform[]).map(p => (
+            <button key={p} onClick={() => setPlatform(p)}
+              className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
+              style={platform === p
+                ? { backgroundColor: PINK, color: '#000' }
+                : { border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)' }}>
+              {p}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs" style={{ color: saving ? 'rgba(255,255,255,0.4)' : saved ? PINK : 'transparent' }}>
+          {saving ? 'Saving...' : '✓ Dates updated'}
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="py-16 text-center rounded-2xl border border-dashed border-white/10">
+          <p className="text-white/30 text-sm">No posts assigned to {platform}</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-1">
+          {filtered.map((post, i) => {
+            const cover = post.assets[0]
+            const isDragging = dragIdx === i
+            const isOver = overIdx === i && dragIdx !== null && dragIdx !== i
+            return (
+              <div key={post.id}
+                draggable
+                onDragStart={() => { setDragIdx(i); setOverIdx(null) }}
+                onDragOver={e => { e.preventDefault(); setOverIdx(i) }}
+                onDragLeave={() => setOverIdx(null)}
+                onDrop={() => { handleDrop(dragIdx!, i); setDragIdx(null); setOverIdx(null) }}
+                onDragEnd={() => { setDragIdx(null); setOverIdx(null) }}
+                className="relative cursor-grab active:cursor-grabbing"
+                style={{ opacity: isDragging ? 0.35 : 1, transition: 'opacity 0.15s' }}>
+                <div className="aspect-[3/4] overflow-hidden rounded-sm relative"
+                  style={{
+                    backgroundColor: '#111',
+                    outline: isOver ? `2px solid ${PINK}` : '2px solid transparent',
+                    outlineOffset: '2px',
+                    transition: 'outline 0.1s',
+                  }}>
+                  {cover ? (
+                    cover.file_type === 'video'
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? cover.thumbnail_url ? <img src={cover.thumbnail_url} alt="" className="w-full h-full object-cover" /> : <video src={cover.file_url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                      // eslint-disable-next-line @next/next/no-img-element
+                      : <img src={cover.file_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-white/20">?</div>
+                  )}
+                  {/* Status dot */}
+                  <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full shadow"
+                    style={{ backgroundColor: post.status === 'approved' ? PINK : post.status === 'changes_requested' ? '#ff6b6b' : 'rgba(255,255,255,0.4)' }} />
+                  {/* Drag hint */}
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                    style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}>
+                    <span className="text-white/70 text-lg select-none">⠿</span>
+                  </div>
+                </div>
+                {post.scheduled_date && (
+                  <p className="text-center mt-1 text-xs text-white/30">
+                    {new Date(post.scheduled_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <p className="text-xs text-center text-white/20">Drag to reorder — dates shift automatically</p>
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [campaign, setCampaign] = useState<Campaign | null>(null)
@@ -229,24 +329,21 @@ export default function CampaignDetailPage() {
   const [copied, setCopied] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [editingPost, setEditingPost] = useState<EditState | null>(null)
+  const [pageTab, setPageTab] = useState<PageTab>('posts')
 
   useEffect(() => {
     if (!id) return
     supabase.from('campaigns').select('*').eq('id', id).single()
       .then(async ({ data: c }) => {
         setCampaign(c)
-        if (c) {
-          const enriched = await fetchPostsWithAssets(c.id)
-          setPosts(enriched)
-        }
+        if (c) setPosts(await fetchPostsWithAssets(c.id))
         setLoading(false)
       })
   }, [id])
 
   function copyLink() {
     if (!campaign) return
-    const url = `${window.location.origin}/review/${campaign.token}`
-    navigator.clipboard.writeText(url)
+    navigator.clipboard.writeText(`${window.location.origin}/review/${campaign.token}`)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -293,15 +390,9 @@ export default function CampaignDetailPage() {
   return (
     <div className="min-h-screen bg-black p-6 md:p-10">
       {editingPost && campaign && (
-        <EditModal
-          state={editingPost}
-          campaignId={campaign.id}
-          onSave={updated => {
-            setPosts(p => p.map(x => x.id === updated.id ? updated : x))
-            setEditingPost(null)
-          }}
-          onClose={() => setEditingPost(null)}
-        />
+        <EditModal state={editingPost} campaignId={campaign.id}
+          onSave={updated => { setPosts(p => p.map(x => x.id === updated.id ? updated : x)); setEditingPost(null) }}
+          onClose={() => setEditingPost(null)} />
       )}
 
       <div className="max-w-3xl mx-auto">
@@ -309,6 +400,7 @@ export default function CampaignDetailPage() {
           <Link href="/admin" className="text-white/40 hover:text-white transition-colors text-sm">← Back</Link>
         </div>
 
+        {/* Header */}
         <div className="flex items-start justify-between gap-4 mb-8 flex-wrap">
           <div>
             <div className="flex items-center gap-3">
@@ -330,10 +422,23 @@ export default function CampaignDetailPage() {
                 {publishing ? 'Publishing...' : '↑ Publish campaign'}
               </button>
             ) : (
-              <button onClick={copyLink} className="px-5 py-2.5 rounded-full text-sm font-semibold text-black transition-all"
-                style={{ backgroundColor: copied ? '#ffffff' : PINK }}>
-                {copied ? '✓ Copied!' : 'Copy client link'}
-              </button>
+              <>
+                <button onClick={async () => {
+                  await supabase.from('campaigns').update({ status: 'draft' }).eq('id', campaign.id)
+                  setCampaign(c => c ? { ...c, status: 'draft' } : c)
+                }}
+                  className="px-4 py-2.5 rounded-full text-sm font-medium transition-colors"
+                  style={{ border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.4)' }}
+                  onMouseOver={e => (e.currentTarget.style.color = '#fff')}
+                  onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}>
+                  ↓ Move to draft
+                </button>
+                <button onClick={copyLink}
+                  className="px-5 py-2.5 rounded-full text-sm font-semibold text-black transition-all"
+                  style={{ backgroundColor: copied ? '#ffffff' : PINK }}>
+                  {copied ? '✓ Copied!' : 'Copy client link'}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -353,7 +458,7 @@ export default function CampaignDetailPage() {
         </div>
 
         {changes > 0 && (
-          <div className="flex justify-end mb-6">
+          <div className="flex justify-end mb-4">
             <button onClick={resetAllChanges}
               className="text-xs px-4 py-2 rounded-full border transition-colors"
               style={{ borderColor: '#ff6b6b40', color: '#ff6b6b99' }}
@@ -364,87 +469,99 @@ export default function CampaignDetailPage() {
           </div>
         )}
 
-        {/* Posts */}
-        <div className="space-y-4">
-          {posts.map(post => {
-            const cover = post.assets[0]
-            const isCarousel = post.assets.length > 1
-            return (
-              <div key={post.id} className="border border-white/10 rounded-2xl p-4 flex gap-4"
-                style={post.status === 'changes_requested' ? { borderColor: '#ff6b6b30' } : {}}>
-                {/* Thumbnail */}
-                <div className="w-24 h-24 rounded-xl overflow-hidden bg-white/5 shrink-0 relative">
-                  {cover ? (
-                    cover.file_type === 'video'
-                      ? <video src={cover.file_url} className="w-full h-full object-cover" muted />
-                      // eslint-disable-next-line @next/next/no-img-element
-                      : <img src={cover.file_url} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">no file</div>
-                  )}
-                  {isCarousel && (
-                    <div className="absolute bottom-1 right-1 bg-black/60 rounded px-1 py-0.5 text-white text-[9px] font-medium">
-                      1/{post.assets.length}
-                    </div>
-                  )}
-                </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-2">
-                    {isCarousel && (
-                      <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: '#f6a7d715', color: PINK }}>
-                        Carousel · {post.assets.length}
-                      </span>
-                    )}
-                    {parsePlatforms(post.platform).map(p => (
-                      <span key={p} className="text-xs text-white/40 border border-white/10 rounded-full px-2 py-0.5">{p}</span>
-                    ))}
-                    <span className="text-xs px-2.5 py-0.5 rounded-full font-medium"
-                      style={
-                        post.status === 'approved' ? { backgroundColor: '#f6a7d720', color: PINK }
-                        : post.status === 'changes_requested' ? { backgroundColor: '#ff6b6b20', color: '#ff6b6b' }
-                        : { backgroundColor: '#ffffff15', color: '#ffffff60' }
-                      }>
-                      {post.status === 'approved' ? '✓ Approved' : post.status === 'changes_requested' ? '⚡ Changes' : '· Pending'}
-                    </span>
-                  </div>
-                  {post.scheduled_date && (
-                    <p className="text-xs mb-1" style={{ color: PINK }}>
-                      📅 {new Date(post.scheduled_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </p>
-                  )}
-                  {post.caption && (
-                    <p className="text-sm text-white/60 leading-relaxed line-clamp-2">{post.caption}</p>
-                  )}
-                  {post.feedback && (
-                    <p className="text-xs text-red-300/80 mt-1 italic">"{post.feedback}"</p>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex gap-2 mt-2 flex-wrap">
-                    <button onClick={() => openEdit(post)}
-                      className="text-xs px-3 py-1 rounded-full border transition-colors"
-                      style={{ borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.4)' }}
-                      onMouseOver={e => (e.currentTarget.style.color = '#fff')}
-                      onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}>
-                      ✎ Edit
-                    </button>
-                    {post.status === 'changes_requested' && (
-                      <button onClick={() => resetPostToPending(post.id)}
-                        className="text-xs px-3 py-1 rounded-full border transition-colors"
-                        style={{ borderColor: '#ff6b6b30', color: '#ff6b6b80' }}
-                        onMouseOver={e => (e.currentTarget.style.color = '#ff6b6b')}
-                        onMouseOut={e => (e.currentTarget.style.color = '#ff6b6b80')}>
-                        ↺ Reset only
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6">
+          {(['posts', 'grid'] as PageTab[]).map(t => (
+            <button key={t} onClick={() => setPageTab(t)}
+              className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
+              style={pageTab === t ? { backgroundColor: PINK, color: '#000' } : { color: 'rgba(255,255,255,0.4)' }}>
+              {t === 'posts' ? 'Posts' : 'Grid'}
+            </button>
+          ))}
         </div>
+
+        {/* Posts list */}
+        {pageTab === 'posts' && (
+          <div className="space-y-4">
+            {posts.map(post => {
+              const cover = post.assets[0]
+              const isCarousel = post.assets.length > 1
+              return (
+                <div key={post.id} className="border border-white/10 rounded-2xl p-4 flex gap-4"
+                  style={post.status === 'changes_requested' ? { borderColor: '#ff6b6b30' } : {}}>
+                  <div className="w-24 h-24 rounded-xl overflow-hidden bg-white/5 shrink-0 relative">
+                    {cover ? (
+                      cover.file_type === 'video'
+                        ? cover.thumbnail_url
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={cover.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                          : <video src={cover.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                        // eslint-disable-next-line @next/next/no-img-element
+                        : <img src={cover.file_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">no file</div>
+                    )}
+                    {isCarousel && (
+                      <div className="absolute bottom-1 right-1 bg-black/60 rounded px-1 py-0.5 text-white text-[9px] font-medium">
+                        1/{post.assets.length}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-2">
+                      {isCarousel && (
+                        <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: '#f6a7d715', color: PINK }}>
+                          Carousel · {post.assets.length}
+                        </span>
+                      )}
+                      {parsePlatforms(post.platform).map(p => (
+                        <span key={p} className="text-xs text-white/40 border border-white/10 rounded-full px-2 py-0.5">{p}</span>
+                      ))}
+                      <span className="text-xs px-2.5 py-0.5 rounded-full font-medium"
+                        style={
+                          post.status === 'approved' ? { backgroundColor: '#f6a7d720', color: PINK }
+                          : post.status === 'changes_requested' ? { backgroundColor: '#ff6b6b20', color: '#ff6b6b' }
+                          : { backgroundColor: '#ffffff15', color: '#ffffff60' }
+                        }>
+                        {post.status === 'approved' ? '✓ Approved' : post.status === 'changes_requested' ? '⚡ Changes' : '· Pending'}
+                      </span>
+                    </div>
+                    {post.scheduled_date && (
+                      <p className="text-xs mb-1" style={{ color: PINK }}>
+                        📅 {new Date(post.scheduled_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    )}
+                    {post.caption && <p className="text-sm text-white/60 leading-relaxed line-clamp-2">{post.caption}</p>}
+                    {post.feedback && <p className="text-xs text-red-300/80 mt-1 italic">"{post.feedback}"</p>}
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      <button onClick={() => openEdit(post)}
+                        className="text-xs px-3 py-1 rounded-full border transition-colors"
+                        style={{ borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.4)' }}
+                        onMouseOver={e => (e.currentTarget.style.color = '#fff')}
+                        onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}>
+                        ✎ Edit
+                      </button>
+                      {post.status === 'changes_requested' && (
+                        <button onClick={() => resetPostToPending(post.id)}
+                          className="text-xs px-3 py-1 rounded-full border transition-colors"
+                          style={{ borderColor: '#ff6b6b30', color: '#ff6b6b80' }}
+                          onMouseOver={e => (e.currentTarget.style.color = '#ff6b6b')}
+                          onMouseOut={e => (e.currentTarget.style.color = '#ff6b6b80')}>
+                          ↺ Reset only
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Grid tab */}
+        {pageTab === 'grid' && (
+          <AdminGrid posts={posts} onUpdate={setPosts} />
+        )}
 
         {/* Client link */}
         {campaign.status === 'active' && (
