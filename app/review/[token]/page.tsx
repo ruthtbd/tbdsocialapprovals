@@ -24,9 +24,9 @@ function formatDate(d: string | null) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onFeedbackChange }: {
+function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onUndo, onFeedbackChange }: {
   post: PostWithUI; theme: Theme
-  onApprove: () => void; onRequestChanges: () => void; onReject: () => void; onFeedbackChange: (v: string) => void
+  onApprove: () => void; onRequestChanges: () => void; onReject: () => void; onUndo: () => void; onFeedbackChange: (v: string) => void
 }) {
   const isApproved = post.status === 'approved'
   const isChanges = post.status === 'changes_requested'
@@ -50,21 +50,46 @@ function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onFeedba
         )}
 
         {isApproved && (
-          <div className="flex items-center gap-2 text-sm font-medium py-2 px-4 rounded-full w-fit" style={{ backgroundColor: '#f6a7d720', color: PINK }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-4 h-4"><path d="M20 6L9 17l-5-5" /></svg>
-            Approved
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-medium py-2 px-4 rounded-full" style={{ backgroundColor: '#f6a7d720', color: PINK }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-4 h-4"><path d="M20 6L9 17l-5-5" /></svg>
+              Approved
+            </div>
+            <button onClick={onUndo} disabled={post.submitting}
+              className="text-xs px-3 py-1.5 rounded-full transition-colors disabled:opacity-40"
+              style={{ border: `1px solid ${theme.border}`, color: theme.faint }}>
+              Undo
+            </button>
           </div>
         )}
         {isChanges && (
-          <div className="rounded-xl p-3 text-sm" style={{ backgroundColor: '#ff6b6b15', color: '#ff6b6b' }}>
-            <span className="font-medium">Changes requested</span>
-            {post.feedback && <p className="mt-1 text-xs opacity-80">"{post.feedback}"</p>}
+          <div className="space-y-2">
+            <div className="rounded-xl p-3 text-sm" style={{ backgroundColor: '#ff6b6b15', color: '#ff6b6b' }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">Changes requested</span>
+                <button onClick={onUndo} disabled={post.submitting}
+                  className="text-xs px-3 py-1 rounded-full transition-colors disabled:opacity-40 shrink-0"
+                  style={{ border: '1px solid rgba(255,107,107,0.3)', color: 'rgba(255,107,107,0.6)' }}>
+                  Undo
+                </button>
+              </div>
+              {post.feedback && <p className="mt-1 text-xs opacity-80">"{post.feedback}"</p>}
+            </div>
           </div>
         )}
         {isRejected && (
-          <div className="rounded-xl p-3 text-sm" style={{ backgroundColor: '#ff3b3b15', color: '#ff6b6b' }}>
-            <span className="font-medium">Rejected</span>
-            {post.feedback && <p className="mt-1 text-xs opacity-80">"{post.feedback}"</p>}
+          <div className="space-y-2">
+            <div className="rounded-xl p-3 text-sm" style={{ backgroundColor: '#ff3b3b15', color: '#ff6b6b' }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">Rejected</span>
+                <button onClick={onUndo} disabled={post.submitting}
+                  className="text-xs px-3 py-1 rounded-full transition-colors disabled:opacity-40 shrink-0"
+                  style={{ border: '1px solid rgba(255,107,107,0.3)', color: 'rgba(255,107,107,0.6)' }}>
+                  Undo
+                </button>
+              </div>
+              {post.feedback && <p className="mt-1 text-xs opacity-80">"{post.feedback}"</p>}
+            </div>
           </div>
         )}
 
@@ -200,7 +225,7 @@ export default function ReviewPage() {
       })
   }, [token])
 
-  async function updatePost(postId: string, status: 'approved' | 'changes_requested' | 'rejected', feedback: string) {
+  async function updatePost(postId: string, status: 'approved' | 'changes_requested' | 'rejected' | 'pending', feedback: string) {
     setPosts(p => p.map(x => x.id === postId ? { ...x, submitting: true } : x))
     await supabase.from('posts').update({ status, feedback: feedback || null }).eq('id', postId)
     setPosts(p => p.map(x => x.id === postId ? { ...x, status, feedback: feedback || null, submitting: false } : x))
@@ -271,6 +296,7 @@ export default function ReviewPage() {
                   onApprove={() => updatePost(post.id, 'approved', post.feedbackDraft)}
                   onRequestChanges={() => updatePost(post.id, 'changes_requested', post.feedbackDraft)}
                   onReject={() => updatePost(post.id, 'rejected', post.feedbackDraft)}
+                  onUndo={() => updatePost(post.id, 'pending', '')}
                   onFeedbackChange={v => setPosts(p => p.map(x => x.id === post.id ? { ...x, feedbackDraft: v } : x))} />
               </div>
             ))}
