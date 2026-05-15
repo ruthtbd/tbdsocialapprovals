@@ -126,8 +126,8 @@ function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onUndo, 
                 {post.submitting ? '...' : '✓ Approve'}
               </button>
               <button onClick={handleChanges} disabled={post.submitting}
-                className="flex-1 py-3 rounded-full text-sm font-semibold text-black transition-opacity hover:opacity-80 disabled:opacity-40"
-                style={{ backgroundColor: '#ffffff' }}>
+                className="flex-1 py-3 rounded-full text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-40"
+                style={{ backgroundColor: theme.dark ? '#ffffff' : '#000000', color: theme.dark ? '#000' : '#fff' }}>
                 {post.submitting ? '...' : '⚡ Changes'}
               </button>
               <button onClick={handleReject} disabled={post.submitting}
