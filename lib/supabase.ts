@@ -36,7 +36,7 @@ export type Post = {
   platform: string | null
   scheduled_date: string | null
   position: number
-  status: 'pending' | 'approved' | 'changes_requested'
+  status: 'pending' | 'approved' | 'changes_requested' | 'rejected'
   feedback: string | null
   created_at: string
 }

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { MediaCarousel, type CarouselAsset } from '@/components/MediaCarousel'
 
 const PINK = '#f6a7d7'
-type PostStatus = 'pending' | 'approved' | 'changes_requested'
+type PostStatus = 'pending' | 'approved' | 'changes_requested' | 'rejected'
 type Tab = 'review' | 'grid'
 type GridPlatform = 'Instagram' | 'TikTok'
 
@@ -188,7 +188,8 @@ export default function DemoPage() {
             {posts.map((post, i) => {
               const isApproved = post.status === 'approved'
               const isChanges = post.status === 'changes_requested'
-              const isDone = isApproved || isChanges
+              const isRejected = post.status === 'rejected'
+              const isDone = isApproved || isChanges || isRejected
               return (
                 <div key={post.id}>
                   <p className="text-xs mb-3 uppercase tracking-widest" style={{ color: theme.faint }}>Post {i + 1}</p>
@@ -211,19 +212,28 @@ export default function DemoPage() {
                           {feedback[post.id] && <p className="mt-1 text-xs opacity-80">"{feedback[post.id]}"</p>}
                         </div>
                       )}
+                      {isRejected && (
+                        <div className="rounded-xl p-3 text-sm" style={{ backgroundColor: '#ff3b3b15', color: '#ff6b6b' }}>
+                          <span className="font-medium">Rejected</span>
+                          {feedback[post.id] && <p className="mt-1 text-xs opacity-80">"{feedback[post.id]}"</p>}
+                        </div>
+                      )}
                       {!isDone && (
                         <div className="space-y-3 pt-1">
                           <textarea value={feedback[post.id]} onChange={e => setFeedback(f => ({ ...f, [post.id]: e.target.value }))}
-                            placeholder="Feedback / change request (optional)" rows={2}
+                            placeholder="Feedback (optional)" rows={2}
                             className="w-full rounded-xl px-4 py-2.5 text-sm focus:outline-none resize-none"
                             style={{ backgroundColor: theme.inputBg, border: `1px solid ${theme.border}`, color: theme.text }} />
-                          <div className="flex gap-3">
+                          <div className="flex gap-2">
                             <button onClick={() => setStatuses(s => ({ ...s, [post.id]: 'approved' }))}
                               className="flex-1 py-3 rounded-full text-sm font-semibold text-black hover:opacity-80 transition-opacity"
                               style={{ backgroundColor: PINK }}>✓ Approve</button>
                             <button onClick={() => setStatuses(s => ({ ...s, [post.id]: 'changes_requested' }))}
                               className="flex-1 py-3 rounded-full text-sm font-semibold transition-colors"
-                              style={{ border: `1px solid ${theme.border}`, color: theme.subtext }}>⚡ Request changes</button>
+                              style={{ border: `1px solid ${theme.border}`, color: theme.subtext }}>⚡ Changes</button>
+                            <button onClick={() => setStatuses(s => ({ ...s, [post.id]: 'rejected' }))}
+                              className="flex-1 py-3 rounded-full text-sm font-semibold transition-colors"
+                              style={{ border: '1px solid rgba(255,59,59,0.4)', color: '#ff6b6b' }}>✕ Reject</button>
                           </div>
                         </div>
                       )}

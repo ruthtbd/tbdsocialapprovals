@@ -24,17 +24,18 @@ function formatDate(d: string | null) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-function PostCard({ post, theme, onApprove, onRequestChanges, onFeedbackChange }: {
+function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onFeedbackChange }: {
   post: PostWithUI; theme: Theme
-  onApprove: () => void; onRequestChanges: () => void; onFeedbackChange: (v: string) => void
+  onApprove: () => void; onRequestChanges: () => void; onReject: () => void; onFeedbackChange: (v: string) => void
 }) {
   const isApproved = post.status === 'approved'
   const isChanges = post.status === 'changes_requested'
-  const isDone = isApproved || isChanges
+  const isRejected = post.status === 'rejected'
+  const isDone = isApproved || isChanges || isRejected
 
   return (
     <div className="rounded-3xl overflow-hidden transition-all" style={{
-      border: `1px solid ${isApproved ? '#f6a7d740' : isChanges ? '#ff6b6b40' : theme.border}`,
+      border: `1px solid ${isApproved ? '#f6a7d740' : (isChanges || isRejected) ? '#ff6b6b40' : theme.border}`,
     }}>
       <div style={{ backgroundColor: theme.mediaBg }}>
         <MediaCarousel assets={post.assets} mediaBg={theme.mediaBg} />
@@ -60,14 +61,20 @@ function PostCard({ post, theme, onApprove, onRequestChanges, onFeedbackChange }
             {post.feedback && <p className="mt-1 text-xs opacity-80">"{post.feedback}"</p>}
           </div>
         )}
+        {isRejected && (
+          <div className="rounded-xl p-3 text-sm" style={{ backgroundColor: '#ff3b3b15', color: '#ff6b6b' }}>
+            <span className="font-medium">Rejected</span>
+            {post.feedback && <p className="mt-1 text-xs opacity-80">"{post.feedback}"</p>}
+          </div>
+        )}
 
         {!isDone && (
           <div className="space-y-3 pt-1">
             <textarea value={post.feedbackDraft} onChange={e => onFeedbackChange(e.target.value)}
-              placeholder="Feedback / change request (optional)" rows={2}
+              placeholder="Feedback (optional)" rows={2}
               className="w-full rounded-xl px-4 py-2.5 text-sm focus:outline-none resize-none transition-colors"
               style={{ backgroundColor: theme.inputBg, border: `1px solid ${theme.border}`, color: theme.text }} />
-            <div className="flex gap-3">
+            <div className="flex gap-2">
               <button onClick={onApprove} disabled={post.submitting}
                 className="flex-1 py-3 rounded-full text-sm font-semibold text-black transition-opacity hover:opacity-80 disabled:opacity-40"
                 style={{ backgroundColor: PINK }}>
@@ -76,7 +83,12 @@ function PostCard({ post, theme, onApprove, onRequestChanges, onFeedbackChange }
               <button onClick={onRequestChanges} disabled={post.submitting}
                 className="flex-1 py-3 rounded-full text-sm font-semibold transition-colors disabled:opacity-40"
                 style={{ border: `1px solid ${theme.border}`, color: theme.subtext }}>
-                {post.submitting ? '...' : '⚡ Request changes'}
+                {post.submitting ? '...' : '⚡ Changes'}
+              </button>
+              <button onClick={onReject} disabled={post.submitting}
+                className="flex-1 py-3 rounded-full text-sm font-semibold transition-colors disabled:opacity-40"
+                style={{ border: '1px solid rgba(255,59,59,0.4)', color: '#ff6b6b' }}>
+                {post.submitting ? '...' : '✕ Reject'}
               </button>
             </div>
           </div>
@@ -137,7 +149,7 @@ function GridPreview({ posts, theme }: { posts: PostWithUI[]; theme: Theme }) {
 
                   {/* Status dot */}
                   <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full shadow" style={{
-                    backgroundColor: post.status === 'approved' ? PINK : post.status === 'changes_requested' ? '#ff6b6b' : 'rgba(255,255,255,0.5)'
+                    backgroundColor: post.status === 'approved' ? PINK : (post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b' : 'rgba(255,255,255,0.5)'
                   }} />
 
                   {/* Video icon — single video posts only */}
@@ -188,7 +200,7 @@ export default function ReviewPage() {
       })
   }, [token])
 
-  async function updatePost(postId: string, status: 'approved' | 'changes_requested', feedback: string) {
+  async function updatePost(postId: string, status: 'approved' | 'changes_requested' | 'rejected', feedback: string) {
     setPosts(p => p.map(x => x.id === postId ? { ...x, submitting: true } : x))
     await supabase.from('posts').update({ status, feedback: feedback || null }).eq('id', postId)
     setPosts(p => p.map(x => x.id === postId ? { ...x, status, feedback: feedback || null, submitting: false } : x))
@@ -196,6 +208,7 @@ export default function ReviewPage() {
 
   const allDone = posts.length > 0 && posts.every(p => p.status !== 'pending')
   const allApproved = posts.length > 0 && posts.every(p => p.status === 'approved')
+  const anyRejected = posts.some(p => p.status === 'rejected')
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: theme.bg }}>
@@ -257,17 +270,18 @@ export default function ReviewPage() {
                 <PostCard post={post} theme={theme}
                   onApprove={() => updatePost(post.id, 'approved', post.feedbackDraft)}
                   onRequestChanges={() => updatePost(post.id, 'changes_requested', post.feedbackDraft)}
+                  onReject={() => updatePost(post.id, 'rejected', post.feedbackDraft)}
                   onFeedbackChange={v => setPosts(p => p.map(x => x.id === post.id ? { ...x, feedbackDraft: v } : x))} />
               </div>
             ))}
             {allDone && (
               <div className="rounded-3xl p-8 text-center" style={{ border: `1px solid ${allApproved ? '#f6a7d730' : '#ff6b6b30'}`, backgroundColor: allApproved ? '#f6a7d708' : '#ff6b6b08' }}>
-                <div className="text-3xl mb-3">{allApproved ? '🎉' : '✍️'}</div>
+                <div className="text-3xl mb-3">{allApproved ? '🎉' : anyRejected ? '🚫' : '✍️'}</div>
                 <h2 className="font-semibold text-lg mb-1" style={{ color: allApproved ? PINK : '#ff9999' }}>
                   {allApproved ? 'All approved!' : 'Review complete'}
                 </h2>
                 <p className="text-sm" style={{ color: theme.subtext }}>
-                  {allApproved ? "You're all set. We'll get these scheduled." : "We've received your feedback and will make the changes."}
+                  {allApproved ? "You're all set. We'll get these scheduled." : "We've received your feedback and will be in touch."}
                 </p>
               </div>
             )}

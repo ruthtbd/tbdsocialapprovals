@@ -545,7 +545,7 @@ function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (po
                   )}
                   {/* Status dot */}
                   <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full shadow"
-                    style={{ backgroundColor: post.status === 'approved' ? PINK : post.status === 'changes_requested' ? '#ff6b6b' : 'rgba(255,255,255,0.4)' }} />
+                    style={{ backgroundColor: post.status === 'approved' ? PINK : (post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b' : 'rgba(255,255,255,0.4)' }} />
                   {/* Drag hint */}
                   <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
                     style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}>
@@ -610,7 +610,7 @@ export default function CampaignDetailPage() {
   }
 
   async function resetAllChanges() {
-    const ids = posts.filter(p => p.status === 'changes_requested').map(p => p.id)
+    const ids = posts.filter(p => p.status === 'changes_requested' || p.status === 'rejected').map(p => p.id)
     if (!ids.length) return
     await supabase.from('posts').update({ status: 'pending', feedback: null }).in('id', ids)
     setPosts(p => p.map(x => ids.includes(x.id) ? { ...x, status: 'pending', feedback: null } : x))
@@ -630,6 +630,7 @@ export default function CampaignDetailPage() {
 
   const approved = posts.filter(p => p.status === 'approved').length
   const changes = posts.filter(p => p.status === 'changes_requested').length
+  const rejected = posts.filter(p => p.status === 'rejected').length
   const pending = posts.filter(p => p.status === 'pending').length
 
   if (loading) return <div className="min-h-screen bg-black p-10 text-white/40 text-sm">Loading...</div>
@@ -692,11 +693,12 @@ export default function CampaignDetailPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-4 gap-3 mb-4">
           {[
             { label: 'Pending', count: pending, color: '#ffffff40' },
             { label: 'Approved', count: approved, color: PINK },
             { label: 'Changes', count: changes, color: '#ff6b6b' },
+            { label: 'Rejected', count: rejected, color: '#ff6b6b' },
           ].map(s => (
             <div key={s.label} className="border border-white/10 rounded-xl p-4 text-center">
               <div className="text-2xl font-bold" style={{ color: s.color }}>{s.count}</div>
@@ -705,14 +707,14 @@ export default function CampaignDetailPage() {
           ))}
         </div>
 
-        {changes > 0 && (
+        {(changes > 0 || rejected > 0) && (
           <div className="flex justify-end mb-4">
             <button onClick={resetAllChanges}
               className="text-xs px-4 py-2 rounded-full border transition-colors"
               style={{ borderColor: '#ff6b6b40', color: '#ff6b6b99' }}
               onMouseOver={e => (e.currentTarget.style.color = '#ff6b6b')}
               onMouseOut={e => (e.currentTarget.style.color = '#ff6b6b99')}>
-              ↺ Reset all changes for re-review
+              ↺ Reset all for re-review
             </button>
           </div>
         )}
@@ -736,7 +738,7 @@ export default function CampaignDetailPage() {
               const isCarousel = post.assets.length > 1
               return (
                 <div key={post.id} className="border border-white/10 rounded-2xl p-4 flex gap-4"
-                  style={post.status === 'changes_requested' ? { borderColor: '#ff6b6b30' } : {}}>
+                  style={(post.status === 'changes_requested' || post.status === 'rejected') ? { borderColor: '#ff6b6b30' } : {}}>
                   <div className="w-24 h-24 rounded-xl overflow-hidden bg-white/5 shrink-0 relative">
                     {cover ? (
                       cover.file_type === 'video'
@@ -769,9 +771,10 @@ export default function CampaignDetailPage() {
                         style={
                           post.status === 'approved' ? { backgroundColor: '#f6a7d720', color: PINK }
                           : post.status === 'changes_requested' ? { backgroundColor: '#ff6b6b20', color: '#ff6b6b' }
+                          : post.status === 'rejected' ? { backgroundColor: '#ff3b3b20', color: '#ff6b6b' }
                           : { backgroundColor: '#ffffff15', color: '#ffffff60' }
                         }>
-                        {post.status === 'approved' ? '✓ Approved' : post.status === 'changes_requested' ? '⚡ Changes' : '· Pending'}
+                        {post.status === 'approved' ? '✓ Approved' : post.status === 'changes_requested' ? '⚡ Changes' : post.status === 'rejected' ? '✕ Rejected' : '· Pending'}
                       </span>
                     </div>
                     {post.scheduled_date && (
@@ -789,7 +792,7 @@ export default function CampaignDetailPage() {
                         onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}>
                         ✎ Edit
                       </button>
-                      {post.status === 'changes_requested' && (
+                      {(post.status === 'changes_requested' || post.status === 'rejected') && (
                         <button onClick={() => resetPostToPending(post.id)}
                           className="text-xs px-3 py-1 rounded-full border transition-colors"
                           style={{ borderColor: '#ff6b6b30', color: '#ff6b6b80' }}
