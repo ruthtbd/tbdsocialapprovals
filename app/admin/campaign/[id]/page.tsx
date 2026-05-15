@@ -783,7 +783,12 @@ export default function CampaignDetailPage() {
                       </p>
                     )}
                     {post.caption && <p className="text-sm text-white/60 leading-relaxed line-clamp-2">{post.caption}</p>}
-                    {post.feedback && <p className="text-xs text-red-300/80 mt-1 italic">"{post.feedback}"</p>}
+                    {(post.status === 'changes_requested' || post.status === 'rejected') && (
+                      <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: '#ff6b6b12', border: '1px solid #ff6b6b25' }}>
+                        <span style={{ color: '#ff6b6b80' }}>Client note: </span>
+                        <span style={{ color: '#ff9999' }}>{post.feedback || <em style={{ opacity: 0.5 }}>No note left</em>}</span>
+                      </div>
+                    )}
                     <div className="flex gap-2 mt-2 flex-wrap">
                       <button onClick={() => openEdit(post)}
                         className="text-xs px-3 py-1 rounded-full border transition-colors"

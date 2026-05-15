@@ -28,10 +28,23 @@ function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onUndo, 
   post: PostWithUI; theme: Theme
   onApprove: () => void; onRequestChanges: () => void; onReject: () => void; onUndo: () => void; onFeedbackChange: (v: string) => void
 }) {
+  const [needsFeedback, setNeedsFeedback] = useState(false)
   const isApproved = post.status === 'approved'
   const isChanges = post.status === 'changes_requested'
   const isRejected = post.status === 'rejected'
   const isDone = isApproved || isChanges || isRejected
+
+  function handleChanges() {
+    if (!post.feedbackDraft.trim()) { setNeedsFeedback(true); return }
+    setNeedsFeedback(false)
+    onRequestChanges()
+  }
+
+  function handleReject() {
+    if (!post.feedbackDraft.trim()) { setNeedsFeedback(true); return }
+    setNeedsFeedback(false)
+    onReject()
+  }
 
   return (
     <div className="rounded-3xl overflow-hidden transition-all" style={{
@@ -95,22 +108,29 @@ function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onUndo, 
 
         {!isDone && (
           <div className="space-y-3 pt-1">
-            <textarea value={post.feedbackDraft} onChange={e => onFeedbackChange(e.target.value)}
-              placeholder="Feedback (optional)" rows={2}
-              className="w-full rounded-xl px-4 py-2.5 text-sm focus:outline-none resize-none transition-colors"
-              style={{ backgroundColor: theme.inputBg, border: `1px solid ${theme.border}`, color: theme.text }} />
+            <div>
+              <textarea value={post.feedbackDraft}
+                onChange={e => { onFeedbackChange(e.target.value); if (e.target.value.trim()) setNeedsFeedback(false) }}
+                placeholder="Feedback (optional for approval, required for changes/reject)"
+                rows={2}
+                className="w-full rounded-xl px-4 py-2.5 text-sm focus:outline-none resize-none transition-colors"
+                style={{ backgroundColor: theme.inputBg, border: `1px solid ${needsFeedback ? '#ff6b6b80' : theme.border}`, color: theme.text }} />
+              {needsFeedback && (
+                <p className="text-xs mt-1 px-1" style={{ color: '#ff6b6b' }}>Please describe what needs changing.</p>
+              )}
+            </div>
             <div className="flex gap-2">
               <button onClick={onApprove} disabled={post.submitting}
                 className="flex-1 py-3 rounded-full text-sm font-semibold text-black transition-opacity hover:opacity-80 disabled:opacity-40"
                 style={{ backgroundColor: PINK }}>
                 {post.submitting ? '...' : '✓ Approve'}
               </button>
-              <button onClick={onRequestChanges} disabled={post.submitting}
+              <button onClick={handleChanges} disabled={post.submitting}
                 className="flex-1 py-3 rounded-full text-sm font-semibold transition-colors disabled:opacity-40"
                 style={{ border: `1px solid ${theme.border}`, color: theme.subtext }}>
                 {post.submitting ? '...' : '⚡ Changes'}
               </button>
-              <button onClick={onReject} disabled={post.submitting}
+              <button onClick={handleReject} disabled={post.submitting}
                 className="flex-1 py-3 rounded-full text-sm font-semibold transition-colors disabled:opacity-40"
                 style={{ border: '1px solid rgba(255,59,59,0.4)', color: '#ff6b6b' }}>
                 {post.submitting ? '...' : '✕ Reject'}
