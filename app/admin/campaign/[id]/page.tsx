@@ -12,6 +12,8 @@ const PINK = '#f6a7d7'
 type NewAsset = { id: string; file: File; preview: string; fileType: 'image' | 'video'; thumbnailDataUrl?: string }
 type EditState = {
   postId: string
+  isNew?: boolean
+  newPostPosition?: number
   caption: string
   platforms: string[]
   scheduledDate: string
@@ -262,33 +264,53 @@ function EditModal({ state, campaignId, onSave, onClose }: {
 
   async function handleSave() {
     setSaving(true)
-    await supabase.from('posts').update({
-      caption: caption || null,
-      platform: platforms.length > 0 ? JSON.stringify(platforms) : null,
-      scheduled_date: scheduledDate || null,
-      status: 'pending',
-      feedback: null,
-    }).eq('id', state.postId)
 
-    const removedIds = state.existingAssets.filter(a => !existingAssets.find(e => e.id === a.id)).map(a => a.id)
-    if (removedIds.length) await supabase.from('post_assets').delete().in('id', removedIds)
+    let postId = state.postId
 
-    // Save updated thumbnails for existing assets
-    for (const [assetId, dataUrl] of Object.entries(thumbEdits)) {
-      const asset = existingAssets.find(a => a.id === assetId)
-      if (!asset) continue
-      const blob = await (await fetch(dataUrl)).blob()
-      const thumbPath = `${campaignId}/${state.postId}/${assetId}_thumb.jpg`
-      await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: true })
-      const thumbUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
-      await supabase.from('post_assets').update({ thumbnail_url: thumbUrl }).eq('id', assetId)
+    if (state.isNew) {
+      // INSERT new post
+      const { data: newPost, error } = await supabase.from('posts').insert({
+        campaign_id: campaignId,
+        caption: caption || null,
+        platform: platforms.length > 0 ? JSON.stringify(platforms) : null,
+        scheduled_date: scheduledDate || null,
+        position: state.newPostPosition ?? 0,
+        status: 'pending',
+        feedback: null,
+      }).select().single()
+      if (error || !newPost) { setSaving(false); return }
+      postId = newPost.id
+    } else {
+      // UPDATE existing post
+      await supabase.from('posts').update({
+        caption: caption || null,
+        platform: platforms.length > 0 ? JSON.stringify(platforms) : null,
+        scheduled_date: scheduledDate || null,
+        status: 'pending',
+        feedback: null,
+      }).eq('id', postId)
+
+      const removedIds = state.existingAssets.filter(a => !existingAssets.find(e => e.id === a.id)).map(a => a.id)
+      if (removedIds.length) await supabase.from('post_assets').delete().in('id', removedIds)
+
+      // Save updated thumbnails for existing assets
+      for (const [assetId, dataUrl] of Object.entries(thumbEdits)) {
+        const asset = existingAssets.find(a => a.id === assetId)
+        if (!asset) continue
+        const blob = await (await fetch(dataUrl)).blob()
+        const thumbPath = `${campaignId}/${postId}/${assetId}_thumb.jpg`
+        await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: true })
+        const thumbUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
+        await supabase.from('post_assets').update({ thumbnail_url: thumbUrl }).eq('id', assetId)
+      }
     }
 
-    const nextPosition = existingAssets.length
+    // Upload new assets (applies to both new and existing posts)
+    const nextPosition = state.isNew ? 0 : existingAssets.length
     for (let i = 0; i < newAssets.length; i++) {
       const asset = newAssets[i]
       const ext = asset.file.name.split('.').pop()
-      const path = `${campaignId}/${state.postId}/${asset.id}.${ext}`
+      const path = `${campaignId}/${postId}/${asset.id}.${ext}`
       const { error } = await supabase.storage.from('posts').upload(path, asset.file, { cacheControl: '3600', upsert: false })
       if (error) continue
       const { data: { publicUrl } } = supabase.storage.from('posts').getPublicUrl(path)
@@ -296,19 +318,19 @@ function EditModal({ state, campaignId, onSave, onClose }: {
       let thumbnailUrl: string | null = null
       if (asset.fileType === 'video' && asset.thumbnailDataUrl) {
         const blob = await (await fetch(asset.thumbnailDataUrl)).blob()
-        const thumbPath = `${campaignId}/${state.postId}/${asset.id}_thumb.jpg`
+        const thumbPath = `${campaignId}/${postId}/${asset.id}_thumb.jpg`
         const { error: te } = await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600' })
         if (!te) thumbnailUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
       }
 
       await supabase.from('post_assets').insert({
-        post_id: state.postId, file_url: publicUrl, file_type: asset.fileType,
+        post_id: postId, file_url: publicUrl, file_type: asset.fileType,
         thumbnail_url: thumbnailUrl, position: nextPosition + i,
       })
     }
 
-    const { data: updatedPost } = await supabase.from('posts').select('*').eq('id', state.postId).single()
-    const { data: updatedAssets } = await supabase.from('post_assets').select('*').eq('post_id', state.postId).order('position')
+    const { data: updatedPost } = await supabase.from('posts').select('*').eq('id', postId).single()
+    const { data: updatedAssets } = await supabase.from('post_assets').select('*').eq('post_id', postId).order('position')
     if (updatedPost) onSave({ ...updatedPost, assets: updatedAssets || [] })
     setSaving(false)
   }
@@ -337,7 +359,7 @@ function EditModal({ state, campaignId, onSave, onClose }: {
       <div className="w-full max-w-lg rounded-3xl overflow-hidden max-h-[90vh] flex flex-col"
         style={{ backgroundColor: '#0d0d0d', border: '1px solid rgba(255,255,255,0.1)' }}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="font-semibold text-white">Edit post</h2>
+          <h2 className="font-semibold text-white">{state.isNew ? 'Add post' : 'Edit post'}</h2>
           <button onClick={onClose} className="text-white/40 hover:text-white transition-colors text-xl leading-none">✕</button>
         </div>
         <div className="overflow-y-auto p-6 space-y-5">
@@ -437,7 +459,7 @@ function EditModal({ state, campaignId, onSave, onClose }: {
           <button onClick={handleSave} disabled={saving || totalAssets === 0}
             className="flex-1 py-2.5 rounded-full text-sm font-semibold text-black transition-opacity hover:opacity-80 disabled:opacity-40"
             style={{ backgroundColor: PINK }}>
-            {saving ? 'Saving...' : 'Save & reset for review'}
+            {saving ? 'Saving...' : state.isNew ? 'Add post' : 'Save & reset for review'}
           </button>
         </div>
       </div>
@@ -628,6 +650,20 @@ export default function CampaignDetailPage() {
     })
   }
 
+  function openAddPost() {
+    setEditingPost({
+      postId: '',
+      isNew: true,
+      newPostPosition: posts.length,
+      caption: '',
+      platforms: [],
+      scheduledDate: '',
+      existingAssets: [],
+      newAssets: [],
+      saving: false,
+    })
+  }
+
   const approved = posts.filter(p => p.status === 'approved').length
   const changes = posts.filter(p => p.status === 'changes_requested').length
   const rejected = posts.filter(p => p.status === 'rejected').length
@@ -640,7 +676,13 @@ export default function CampaignDetailPage() {
     <div className="min-h-screen bg-black p-6 md:p-10">
       {editingPost && campaign && (
         <EditModal state={editingPost} campaignId={campaign.id}
-          onSave={updated => { setPosts(p => p.map(x => x.id === updated.id ? updated : x)); setEditingPost(null) }}
+          onSave={updated => {
+            setPosts(p => {
+              const exists = p.some(x => x.id === updated.id)
+              return exists ? p.map(x => x.id === updated.id ? updated : x) : [...p, updated]
+            })
+            setEditingPost(null)
+          }}
           onClose={() => setEditingPost(null)} />
       )}
 
@@ -720,14 +762,25 @@ export default function CampaignDetailPage() {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6">
-          {(['posts', 'grid'] as PageTab[]).map(t => (
-            <button key={t} onClick={() => setPageTab(t)}
-              className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
-              style={pageTab === t ? { backgroundColor: PINK, color: '#000' } : { color: 'rgba(255,255,255,0.4)' }}>
-              {t === 'posts' ? 'Posts' : 'Grid'}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex gap-1">
+            {(['posts', 'grid'] as PageTab[]).map(t => (
+              <button key={t} onClick={() => setPageTab(t)}
+                className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
+                style={pageTab === t ? { backgroundColor: PINK, color: '#000' } : { color: 'rgba(255,255,255,0.4)' }}>
+                {t === 'posts' ? 'Posts' : 'Grid'}
+              </button>
+            ))}
+          </div>
+          {campaign.status === 'draft' && (
+            <button onClick={openAddPost}
+              className="text-xs px-4 py-1.5 rounded-full font-medium transition-colors"
+              style={{ backgroundColor: '#ffffff10', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.6)' }}
+              onMouseOver={e => (e.currentTarget.style.color = '#fff')}
+              onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.6)')}>
+              + Add post
             </button>
-          ))}
+          )}
         </div>
 
         {/* Posts list */}

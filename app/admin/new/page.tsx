@@ -27,10 +27,17 @@ function VideoFramePicker({ src, onSelect, selected }: { src: string; onSelect: 
     setCurrentTime(t)
   }
 
-  function capture() {
+  async function capture() {
     const video = videoRef.current
     const canvas = canvasRef.current
-    if (!video || !canvas) return
+    if (!video || !canvas || !ready) return
+    // Force a fresh seek and wait for frame to decode before drawing
+    const targetTime = video.currentTime
+    video.currentTime = targetTime
+    await new Promise<void>(res => {
+      const h = () => { video.removeEventListener('seeked', h); res() }
+      video.addEventListener('seeked', h)
+    })
     canvas.width = video.videoWidth || 320
     canvas.height = video.videoHeight || 240
     canvas.getContext('2d')!.drawImage(video, 0, 0)
@@ -45,9 +52,10 @@ function VideoFramePicker({ src, onSelect, selected }: { src: string; onSelect: 
         src={src}
         muted
         playsInline
-        preload="metadata"
+        preload="auto"
         className="hidden"
-        onLoadedMetadata={e => { setDuration((e.target as HTMLVideoElement).duration); setReady(true) }}
+        onLoadedMetadata={e => { setDuration((e.target as HTMLVideoElement).duration) }}
+        onLoadedData={() => setReady(true)}
       />
       {ready && (
         <>

@@ -144,7 +144,12 @@ function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onUndo, 
 }
 
 function GridPreview({ posts, theme }: { posts: PostWithUI[]; theme: Theme }) {
-  const [platform, setPlatform] = useState<GridPlatform>('Instagram')
+  const defaultPlatform: GridPlatform = (() => {
+    const ig = posts.filter(p => parsePlatforms(p.platform).includes('Instagram')).length
+    const tt = posts.filter(p => parsePlatforms(p.platform).includes('TikTok')).length
+    return tt > ig ? 'TikTok' : 'Instagram'
+  })()
+  const [platform, setPlatform] = useState<GridPlatform>(defaultPlatform)
 
   const filtered = posts
     .filter(p => parsePlatforms(p.platform).includes(platform))
