@@ -67,14 +67,15 @@ export function parsePlatforms(platform: string | null): string[] {
 
 // Fetch posts + their assets for a campaign, return as PostWithAssets[]
 export async function fetchPostsWithAssets(campaignId: string): Promise<PostWithAssets[]> {
-  const [{ data: posts }, { data: assets }] = await Promise.all([
-    supabase.from('posts').select('*').eq('campaign_id', campaignId).order('position'),
-    supabase.from('post_assets').select('*').order('position'),
-  ])
-  const assetMap: Record<string, PostAsset[]> = {}
-  for (const a of assets || []) {
-    if (!assetMap[a.post_id]) assetMap[a.post_id] = []
-    assetMap[a.post_id].push(a)
-  }
-  return (posts || []).map(p => ({ ...p, assets: assetMap[p.id] || [] }))
+  const { data } = await supabase
+    .from('posts')
+    .select('*, post_assets(*)')
+    .eq('campaign_id', campaignId)
+    .order('position')
+    .order('position', { referencedTable: 'post_assets' })
+
+  return (data || []).map(p => {
+    const { post_assets, ...post } = p as Post & { post_assets: PostAsset[] }
+    return { ...post, assets: post_assets || [] }
+  })
 }
