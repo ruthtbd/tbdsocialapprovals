@@ -85,7 +85,7 @@ function GridPreview({ posts, theme }: { posts: MockPost[]; theme: Theme }) {
       if (!a.scheduled_date && !b.scheduled_date) return 0
       if (!a.scheduled_date) return 1
       if (!b.scheduled_date) return -1
-      return new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime()
+      return new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime()
     })
 
   return (
@@ -131,7 +131,7 @@ function GridPreview({ posts, theme }: { posts: MockPost[]; theme: Theme }) {
       )}
       {filtered.length > 0 && (
         <p className="text-xs text-center" style={{ color: theme.faint }}>
-          {filtered.length} post{filtered.length !== 1 ? 's' : ''} · sorted newest first
+          {filtered.length} post{filtered.length !== 1 ? 's' : ''} · oldest first
         </p>
       )}
     </div>
