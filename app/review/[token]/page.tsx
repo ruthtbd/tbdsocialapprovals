@@ -59,7 +59,7 @@ function PostCard({ post, theme, onApprove, onRequestChanges, onReject, onUndo, 
           <p className="text-xs font-medium" style={{ color: PINK }}>📅 {formatDate(post.scheduled_date)}</p>
         )}
         {post.caption && (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: theme.subtext }}>{post.caption}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: theme.text }}>{post.caption}</p>
         )}
 
         {isApproved && (
@@ -289,12 +289,17 @@ export default function ReviewPage() {
       {/* Top bar */}
       <div className="sticky top-0 z-20 px-4 py-3 backdrop-blur-xl" style={{ backgroundColor: dark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)', borderBottom: `1px solid ${theme.border}` }}>
         <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium truncate" style={{ color: theme.text }}>{campaign.title}</p>
-            <p className="text-xs" style={{ color: theme.faint }}>Review & approve</p>
-          </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={theme.logo} alt="The Break Digital" className="h-7 w-auto shrink-0 object-contain" />
+          <div className="flex gap-1">
+            {(['review', 'grid'] as Tab[]).map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
+                style={tab === t ? { backgroundColor: PINK, color: '#000' } : { color: theme.subtext }}>
+                {t === 'review' ? 'Review' : 'Grid Preview'}
+              </button>
+            ))}
+          </div>
           <button onClick={() => setDark(d => !d)} className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors" style={{ backgroundColor: theme.inputBg, border: `1px solid ${theme.border}` }}>
             {dark
               ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: theme.subtext }}><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
@@ -302,18 +307,26 @@ export default function ReviewPage() {
             }
           </button>
         </div>
-        <div className="max-w-xl mx-auto flex gap-1 mt-3">
-          {(['review', 'grid'] as Tab[]).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
-              style={tab === t ? { backgroundColor: PINK, color: '#000' } : { color: theme.subtext }}>
-              {t === 'review' ? 'Review' : 'Grid Preview'}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="max-w-xl mx-auto px-4 py-8">
+        {/* Campaign title */}
+        <div className="mb-8 pb-7" style={{ borderBottom: `1px solid ${theme.border}` }}>
+          <p className="text-xs uppercase tracking-widest mb-3" style={{ color: theme.faint, fontFamily: "'Futura', 'Century Gothic', 'Trebuchet MS', sans-serif", letterSpacing: '0.12em' }}>
+            Review &amp; approve
+          </p>
+          <h1 className="font-bold leading-tight" style={{
+            fontSize: 'clamp(1.75rem, 6vw, 2.5rem)',
+            color: theme.text,
+            fontFamily: "'Futura', 'Century Gothic', 'Trebuchet MS', sans-serif",
+          }}>
+            {campaign.title}
+          </h1>
+          {campaign.client_name && (
+            <p className="text-sm mt-2" style={{ color: theme.faint }}>{campaign.client_name}</p>
+          )}
+        </div>
+
         {tab === 'review' && (
           <div className="space-y-8">
             {posts.map((post, i) => (
