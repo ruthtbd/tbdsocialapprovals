@@ -152,7 +152,11 @@ function GridPreview({ posts, theme }: { posts: PostWithUI[]; theme: Theme }) {
   const [platform, setPlatform] = useState<GridPlatform>(defaultPlatform)
 
   const filtered = posts
-    .filter(p => parsePlatforms(p.platform).includes(platform))
+    .filter(p => {
+      const platforms = parsePlatforms(p.platform)
+      // Posts with no platform assigned appear in all grids
+      return platforms.length === 0 || platforms.includes(platform)
+    })
     .sort((a, b) => {
       if (!a.scheduled_date && !b.scheduled_date) return 0
       if (!a.scheduled_date) return 1
@@ -329,7 +333,12 @@ export default function ReviewPage() {
 
         {tab === 'review' && (
           <div className="space-y-8">
-            {posts.map((post, i) => (
+            {[...posts].sort((a, b) => {
+              if (!a.scheduled_date && !b.scheduled_date) return 0
+              if (!a.scheduled_date) return 1
+              if (!b.scheduled_date) return -1
+              return new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime()
+            }).map((post, i) => (
               <div key={post.id}>
                 <p className="text-xs mb-3 uppercase tracking-widest" style={{ color: theme.faint }}>Post {i + 1}</p>
                 <PostCard post={post} theme={theme}

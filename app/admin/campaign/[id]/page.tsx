@@ -502,7 +502,10 @@ function AdminGrid({ posts, theme, onUpdate }: { posts: PostWithAssets[]; theme:
   const [saved, setSaved] = useState(false)
 
   const filtered = [...posts]
-    .filter(p => parsePlatforms(p.platform).includes(platform))
+    .filter(p => {
+      const platforms = parsePlatforms(p.platform)
+      return platforms.length === 0 || platforms.includes(platform)
+    })
     .sort((a, b) => {
       if (!a.scheduled_date && !b.scheduled_date) return 0
       if (!a.scheduled_date) return 1
