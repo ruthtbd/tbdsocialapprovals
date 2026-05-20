@@ -291,28 +291,28 @@ function EditModal({ state, campaignId, onSave, onClose }: {
       }).eq('id', postId)
 
       const removedIds = state.existingAssets.filter(a => !existingAssets.find(e => e.id === a.id)).map(a => a.id)
-      if (removedIds.length) await supabase.from('post_assets').delete().in('id', removedIds)
 
-      // Save updated thumbnails for existing assets
-      for (const [assetId, dataUrl] of Object.entries(thumbEdits)) {
-        const asset = existingAssets.find(a => a.id === assetId)
-        if (!asset) continue
-        const blob = await (await fetch(dataUrl)).blob()
-        const thumbPath = `${campaignId}/${postId}/${assetId}_thumb.jpg`
-        await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: true })
-        const thumbUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
-        await supabase.from('post_assets').update({ thumbnail_url: thumbUrl }).eq('id', assetId)
-      }
+      // Run deletion + all thumbnail uploads in parallel
+      await Promise.all([
+        removedIds.length ? supabase.from('post_assets').delete().in('id', removedIds) : Promise.resolve(),
+        ...Object.entries(thumbEdits).map(async ([assetId, dataUrl]) => {
+          const blob = await (await fetch(dataUrl)).blob()
+          const thumbPath = `${campaignId}/${postId}/${assetId}_thumb.jpg`
+          await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: true })
+          const thumbUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
+          await supabase.from('post_assets').update({ thumbnail_url: thumbUrl }).eq('id', assetId)
+        }),
+      ])
     }
 
-    // Upload new assets (applies to both new and existing posts)
+    // Upload all new assets in parallel
     const nextPosition = state.isNew ? 0 : existingAssets.length
-    for (let i = 0; i < newAssets.length; i++) {
-      const asset = newAssets[i]
+    await Promise.all(newAssets.map(async (asset, i) => {
       const ext = asset.file.name.split('.').pop()
       const path = `${campaignId}/${postId}/${asset.id}.${ext}`
-      const { error } = await supabase.storage.from('posts').upload(path, asset.file, { cacheControl: '3600', upsert: false })
-      if (error) continue
+      const { error } = await supabase.storage.from('posts').upload(path, asset.file, { contentType: asset.file.type, cacheControl: '3600', upsert: false })
+      if (error) return
+
       const { data: { publicUrl } } = supabase.storage.from('posts').getPublicUrl(path)
 
       let thumbnailUrl: string | null = null
@@ -327,10 +327,13 @@ function EditModal({ state, campaignId, onSave, onClose }: {
         post_id: postId, file_url: publicUrl, file_type: asset.fileType,
         thumbnail_url: thumbnailUrl, position: nextPosition + i,
       })
-    }
+    }))
 
-    const { data: updatedPost } = await supabase.from('posts').select('*').eq('id', postId).single()
-    const { data: updatedAssets } = await supabase.from('post_assets').select('*').eq('post_id', postId).order('position')
+    // Fetch updated post + assets in parallel
+    const [{ data: updatedPost }, { data: updatedAssets }] = await Promise.all([
+      supabase.from('posts').select('*').eq('id', postId).single(),
+      supabase.from('post_assets').select('*').eq('post_id', postId).order('position'),
+    ])
     if (updatedPost) onSave({ ...updatedPost, assets: updatedAssets || [] })
     setSaving(false)
   }
@@ -582,6 +585,12 @@ function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (po
               </div>
             )
           })}
+          {/* Pad to at least 9 cells */}
+          {Array.from({ length: Math.max(0, 9 - filtered.length) }).map((_, i) => (
+            <div key={`pad-${i}`}>
+              <div className="aspect-[3/4] rounded-sm" style={{ backgroundColor: '#111', opacity: 0.3 }} />
+            </div>
+          ))}
         </div>
       )}
       <p className="text-xs text-center text-white/20">Drag to reorder — dates shift automatically</p>
