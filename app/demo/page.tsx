@@ -142,7 +142,7 @@ export default function DemoPage() {
   const [statuses, setStatuses] = useState<Record<string, PostStatus>>({ '1': 'pending', '2': 'pending', '3': 'pending', '4': 'pending' })
   const [feedback, setFeedback] = useState<Record<string, string>>({ '1': '', '2': '', '3': '', '4': '' })
   const [tab, setTab] = useState<Tab>('review')
-  const [dark, setDark] = useState(true)
+  const [dark, setDark] = useState(false)
 
   const theme = makeTheme(dark)
   const posts = MOCK_POSTS.map(p => ({ ...p, status: statuses[p.id] }))

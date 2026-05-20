@@ -7,6 +7,27 @@ import { supabase } from '@/lib/supabase'
 const PINK = '#f6a7d7'
 const MAX_FILE_MB = 500
 
+type Theme = { bg: string; card: string; border: string; text: string; subtext: string; faint: string; inputBg: string; dark: boolean }
+
+function makeTheme(dark: boolean): Theme {
+  return dark
+    ? { bg: '#0a0a0a', card: '#111', border: 'rgba(255,255,255,0.1)', text: '#fff', subtext: 'rgba(255,255,255,0.5)', faint: 'rgba(255,255,255,0.25)', inputBg: 'rgba(255,255,255,0.06)', dark: true }
+    : { bg: '#f4f4f4', card: '#fff', border: 'rgba(0,0,0,0.08)', text: '#0a0a0a', subtext: 'rgba(0,0,0,0.5)', faint: 'rgba(0,0,0,0.3)', inputBg: 'rgba(0,0,0,0.04)', dark: false }
+}
+
+function ThemeToggle({ dark, onToggle, border, subtext }: { dark: boolean; onToggle: () => void; border: string; subtext: string }) {
+  return (
+    <button onClick={onToggle}
+      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+      style={{ border: `1px solid ${border}` }}>
+      {dark
+        ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: subtext }}><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: subtext }}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      }
+    </button>
+  )
+}
+
 type AssetDraft = {
   id: string
   file: File
@@ -190,7 +211,7 @@ function makeAssets(files: File[]): AssetDraft[] {
     }))
 }
 
-function PlatformPills({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
+function PlatformPills({ selected, theme, onChange }: { selected: string[]; theme: Theme; onChange: (v: string[]) => void }) {
   function toggle(p: string) {
     onChange(selected.includes(p) ? selected.filter(x => x !== p) : [...selected, p])
   }
@@ -203,7 +224,7 @@ function PlatformPills({ selected, onChange }: { selected: string[]; onChange: (
             className="text-xs px-3 py-1 rounded-full border transition-all"
             style={active
               ? { backgroundColor: PINK, borderColor: PINK, color: '#000' }
-              : { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.4)' }
+              : { backgroundColor: 'transparent', borderColor: theme.border, color: theme.subtext }
             }>{p}</button>
         )
       })}
@@ -224,6 +245,18 @@ export default function NewCampaignPage() {
   const [dragOver, setDragOver] = useState(false)
   const [thumbPicker, setThumbPicker] = useState<{ postId: string; assetId: string; src: string; current?: string } | null>(null)
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
+  const [dark, setDark] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return localStorage.getItem('adminDark') !== 'false'
+  })
+
+  const t = makeTheme(dark)
+
+  function toggleDark() {
+    const next = !dark
+    setDark(next)
+    localStorage.setItem('adminDark', String(next))
+  }
 
   function addFilesAsPosts(files: FileList | null) {
     if (!files) return
@@ -370,7 +403,7 @@ export default function NewCampaignPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black p-6 md:p-10">
+    <div className="min-h-screen transition-colors duration-200 p-6 md:p-10" style={{ backgroundColor: t.bg }}>
       {thumbPicker && (
         <ThumbnailPickerModal
           src={thumbPicker.src}
@@ -386,37 +419,52 @@ export default function NewCampaignPage() {
       )}
 
       <div className="max-w-2xl mx-auto">
-        <div className="flex items-center gap-4 mb-8">
-          <button onClick={() => router.push('/admin')} className="text-white/40 hover:text-white transition-colors text-sm">← Back</button>
-          <h1 className="text-xl font-bold" style={{ color: PINK }}>New Campaign</h1>
+        <div className="flex items-center justify-between gap-4 mb-8">
+          <div className="flex items-center gap-4">
+            <button onClick={() => router.push('/admin')}
+              className="text-sm transition-colors"
+              style={{ color: t.faint }}
+              onMouseOver={e => (e.currentTarget.style.color = t.text)}
+              onMouseOut={e => (e.currentTarget.style.color = t.faint)}>
+              ← Back
+            </button>
+            <h1 className="text-xl font-bold" style={{ color: PINK }}>New Campaign</h1>
+          </div>
+          <ThemeToggle dark={dark} onToggle={toggleDark} border={t.border} subtext={t.subtext} />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4">
             <div>
-              <label className="text-xs uppercase tracking-widest text-white/40 mb-2 block">Campaign Title *</label>
+              <label className="text-xs uppercase tracking-widest mb-2 block" style={{ color: t.faint }}>Campaign Title *</label>
               <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. May Content" required
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-[#f6a7d7] transition-colors" />
+                className="w-full rounded-xl px-4 py-3 focus:outline-none transition-colors"
+                style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text }}
+                onFocus={e => (e.currentTarget.style.borderColor = PINK)}
+                onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
             </div>
             <div>
-              <label className="text-xs uppercase tracking-widest text-white/40 mb-2 block">Client Name</label>
+              <label className="text-xs uppercase tracking-widest mb-2 block" style={{ color: t.faint }}>Client Name</label>
               <input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="e.g. Acme Co"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-[#f6a7d7] transition-colors" />
+                className="w-full rounded-xl px-4 py-3 focus:outline-none transition-colors"
+                style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text }}
+                onFocus={e => (e.currentTarget.style.borderColor = PINK)}
+                onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
             </div>
           </div>
 
           {/* Drop zone */}
           <div>
-            <label className="text-xs uppercase tracking-widest text-white/40 mb-2 block">Posts *</label>
+            <label className="text-xs uppercase tracking-widest mb-2 block" style={{ color: t.faint }}>Posts *</label>
             <div
               onDrop={handleDrop}
               onDragOver={e => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
               onClick={() => document.getElementById('file-input')?.click()}
               className="border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-colors"
-              style={{ borderColor: dragOver ? PINK : 'rgba(255,255,255,0.1)' }}>
-              <p className="text-white/40 text-sm">Drop files here, or <span style={{ color: PINK }}>click to browse</span></p>
-              <p className="text-white/20 text-xs mt-1">Each file becomes its own post · add more to a post to make a carousel</p>
+              style={{ borderColor: dragOver ? PINK : t.border }}>
+              <p className="text-sm" style={{ color: t.subtext }}>Drop files here, or <span style={{ color: PINK }}>click to browse</span></p>
+              <p className="text-xs mt-1" style={{ color: t.faint }}>Each file becomes its own post · add more to a post to make a carousel</p>
               <input id="file-input" type="file" multiple accept="image/*,video/*" className="hidden"
                 onChange={e => addFilesAsPosts(e.target.files)} />
             </div>
@@ -426,9 +474,10 @@ export default function NewCampaignPage() {
           {posts.length > 0 && (
             <div className="space-y-5">
               {posts.map((post, idx) => (
-                <div key={post.id} className="border border-white/10 rounded-2xl p-4 space-y-3">
+                <div key={post.id} className="rounded-2xl p-4 space-y-3"
+                  style={{ border: `1px solid ${t.border}`, backgroundColor: t.card }}>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-white/30 uppercase tracking-widest">
+                    <span className="text-xs uppercase tracking-widest" style={{ color: t.faint }}>
                       Post {idx + 1}
                       {post.assets.length > 1 && (
                         <span className="ml-2 px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: '#f6a7d720', color: PINK }}>
@@ -437,9 +486,21 @@ export default function NewCampaignPage() {
                       )}
                     </span>
                     <div className="flex items-center gap-1">
-                      <button type="button" onClick={() => movePost(post.id, -1)} disabled={idx === 0} className="text-white/30 hover:text-white disabled:opacity-20 px-1.5 py-1">↑</button>
-                      <button type="button" onClick={() => movePost(post.id, 1)} disabled={idx === posts.length - 1} className="text-white/30 hover:text-white disabled:opacity-20 px-1.5 py-1">↓</button>
-                      <button type="button" onClick={() => removePost(post.id)} className="text-white/30 hover:text-red-400 px-1.5 py-1 ml-1">✕</button>
+                      <button type="button" onClick={() => movePost(post.id, -1)} disabled={idx === 0}
+                        className="px-1.5 py-1 disabled:opacity-20 transition-colors"
+                        style={{ color: t.faint }}
+                        onMouseOver={e => (e.currentTarget.style.color = t.text)}
+                        onMouseOut={e => (e.currentTarget.style.color = t.faint)}>↑</button>
+                      <button type="button" onClick={() => movePost(post.id, 1)} disabled={idx === posts.length - 1}
+                        className="px-1.5 py-1 disabled:opacity-20 transition-colors"
+                        style={{ color: t.faint }}
+                        onMouseOver={e => (e.currentTarget.style.color = t.text)}
+                        onMouseOut={e => (e.currentTarget.style.color = t.faint)}>↓</button>
+                      <button type="button" onClick={() => removePost(post.id)}
+                        className="px-1.5 py-1 ml-1 transition-colors"
+                        style={{ color: t.faint }}
+                        onMouseOver={e => (e.currentTarget.style.color = '#ff6b6b')}
+                        onMouseOut={e => (e.currentTarget.style.color = t.faint)}>✕</button>
                     </div>
                   </div>
 
@@ -447,13 +508,14 @@ export default function NewCampaignPage() {
                   <div className="flex gap-2 flex-wrap items-start">
                     {post.assets.map((asset, aIdx) => (
                       <div key={asset.id} className="shrink-0 flex flex-col items-center gap-1">
-                        <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5">
+                        <div className="relative w-16 h-16 rounded-lg overflow-hidden"
+                          style={{ backgroundColor: t.inputBg }}>
                           {asset.fileType === 'video'
                             ? asset.thumbnailDataUrl
                               // eslint-disable-next-line @next/next/no-img-element
                               ? <img src={asset.thumbnailDataUrl} alt="" className="w-full h-full object-cover" />
                               : <div className="w-full h-full flex items-center justify-center">
-                                  <svg viewBox="0 0 24 24" fill="white" className="w-6 h-6 opacity-40"><path d="M8 5v14l11-7z" /></svg>
+                                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6" style={{ color: t.subtext }}><path d="M8 5v14l11-7z" /></svg>
                                 </div>
                             // eslint-disable-next-line @next/next/no-img-element
                             : <img src={asset.preview} alt="" className="w-full h-full object-cover" />
@@ -468,39 +530,44 @@ export default function NewCampaignPage() {
                           <button type="button"
                             onClick={() => setThumbPicker({ postId: post.id, assetId: asset.id, src: asset.preview, current: asset.thumbnailDataUrl })}
                             className="w-16 text-[10px] py-0.5 rounded text-center transition-colors"
-                            style={asset.thumbnailDataUrl ? { color: PINK } : { color: 'rgba(255,255,255,0.35)' }}>
+                            style={asset.thumbnailDataUrl ? { color: PINK } : { color: t.faint }}>
                             {asset.thumbnailDataUrl ? '✓ thumb' : '+ thumb'}
                           </button>
                         )}
-                        <p className="text-[9px] text-white/20 text-center max-w-[64px] truncate">{asset.file.name}</p>
+                        <p className="text-[9px] text-center max-w-[64px] truncate" style={{ color: t.faint }}>{asset.file.name}</p>
                       </div>
                     ))}
 
                     {post.assets.length < 10 && (
                       <button type="button" onClick={() => addAssetsToPost(post.id)}
                         className="w-16 h-16 rounded-lg border border-dashed flex items-center justify-center transition-colors shrink-0"
-                        style={{ borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.3)' }}>
+                        style={{ borderColor: t.border, color: t.subtext }}>
                         <span className="text-xl leading-none">+</span>
                       </button>
                     )}
                   </div>
 
                   <div>
-                    <p className="text-xs text-white/20 mb-1">Scheduled date</p>
+                    <p className="text-xs mb-1" style={{ color: t.faint }}>Scheduled date</p>
                     <input type="date" value={post.scheduledDate}
                       onChange={e => updatePost(post.id, 'scheduledDate', e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-[#f6a7d7] transition-colors"
-                      style={{ colorScheme: 'dark' }} />
+                      className="w-full rounded-lg px-3 py-1.5 text-sm focus:outline-none transition-colors"
+                      style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text, colorScheme: dark ? 'dark' : 'light' }}
+                      onFocus={e => (e.currentTarget.style.borderColor = PINK)}
+                      onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
                   </div>
 
                   <div>
-                    <p className="text-xs text-white/20 mb-1.5">Platforms</p>
-                    <PlatformPills selected={post.platforms} onChange={v => updatePost(post.id, 'platforms', v)} />
+                    <p className="text-xs mb-1.5" style={{ color: t.faint }}>Platforms</p>
+                    <PlatformPills selected={post.platforms} theme={t} onChange={v => updatePost(post.id, 'platforms', v)} />
                   </div>
 
                   <textarea value={post.caption} onChange={e => updatePost(post.id, 'caption', e.target.value)}
                     placeholder="Caption (optional)" rows={2}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#f6a7d7] transition-colors resize-none" />
+                    className="w-full rounded-lg px-3 py-1.5 text-sm focus:outline-none transition-colors resize-none"
+                    style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text }}
+                    onFocus={e => (e.currentTarget.style.borderColor = PINK)}
+                    onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
                 </div>
               ))}
             </div>
@@ -511,7 +578,7 @@ export default function NewCampaignPage() {
             <div className="rounded-xl p-4 space-y-1" style={{ backgroundColor: '#ff6b6b10', border: '1px solid #ff6b6b30' }}>
               <p className="text-xs font-semibold text-red-400 mb-2">Some files failed to upload:</p>
               {uploadErrors.map((e, i) => <p key={i} className="text-xs text-red-300/80">• {e}</p>)}
-              <p className="text-xs text-white/30 mt-2">Check your Supabase Storage bucket's max file size setting, or compress large videos before uploading.</p>
+              <p className="text-xs mt-2" style={{ color: t.subtext }}>Check your Supabase Storage bucket&apos;s max file size setting, or compress large videos before uploading.</p>
               <button type="button" onClick={() => router.push('/admin')}
                 className="mt-2 text-xs px-3 py-1.5 rounded-full transition-colors"
                 style={{ border: `1px solid ${PINK}`, color: PINK }}>
@@ -524,17 +591,17 @@ export default function NewCampaignPage() {
           <div className="pt-2">
             {uploading ? (
               <div className="space-y-2">
-                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: t.inputBg }}>
                   <div className="h-full rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%`, backgroundColor: PINK }} />
                 </div>
-                <p className="text-white/40 text-xs text-center">{uploadStatus}</p>
+                <p className="text-xs text-center" style={{ color: t.subtext }}>{uploadStatus}</p>
               </div>
             ) : uploadErrors.length === 0 ? (
               <div className="flex gap-3">
                 <button type="button" onClick={e => handleSubmit(e, true)}
                   disabled={!title.trim() || posts.length === 0}
                   className="flex-1 py-3 rounded-full font-semibold transition-opacity hover:opacity-80 disabled:opacity-30"
-                  style={{ border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}>
+                  style={{ border: `1px solid ${t.border}`, color: t.subtext }}>
                   Save as Draft
                 </button>
                 <button type="submit" disabled={!title.trim() || posts.length === 0}

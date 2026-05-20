@@ -9,6 +9,27 @@ import { supabase } from '@/lib/supabase'
 const PLATFORMS = ['Instagram', 'TikTok', 'Facebook', 'LinkedIn', 'Twitter/X', 'YouTube', 'Other']
 const PINK = '#f6a7d7'
 
+type Theme = { bg: string; card: string; border: string; text: string; subtext: string; faint: string; inputBg: string; mediaBg: string; dark: boolean }
+
+function makeTheme(dark: boolean): Theme {
+  return dark
+    ? { bg: '#0a0a0a', card: '#111', border: 'rgba(255,255,255,0.1)', text: '#fff', subtext: 'rgba(255,255,255,0.5)', faint: 'rgba(255,255,255,0.25)', inputBg: 'rgba(255,255,255,0.06)', mediaBg: '#111', dark: true }
+    : { bg: '#f4f4f4', card: '#fff', border: 'rgba(0,0,0,0.08)', text: '#0a0a0a', subtext: 'rgba(0,0,0,0.5)', faint: 'rgba(0,0,0,0.3)', inputBg: 'rgba(0,0,0,0.04)', mediaBg: '#e0e0e0', dark: false }
+}
+
+function ThemeToggle({ dark, onToggle, border, subtext }: { dark: boolean; onToggle: () => void; border: string; subtext: string }) {
+  return (
+    <button onClick={onToggle}
+      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+      style={{ border: `1px solid ${border}` }}>
+      {dark
+        ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: subtext }}><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: subtext }}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      }
+    </button>
+  )
+}
+
 type NewAsset = { id: string; file: File; preview: string; fileType: 'image' | 'video'; thumbnailDataUrl?: string }
 type EditState = {
   postId: string
@@ -473,7 +494,7 @@ function EditModal({ state, campaignId, onSave, onClose }: {
 
 // ─── Drag-and-drop Grid ───────────────────────────────────────────────────────
 
-function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (posts: PostWithAssets[]) => void }) {
+function AdminGrid({ posts, theme, onUpdate }: { posts: PostWithAssets[]; theme: Theme; onUpdate: (posts: PostWithAssets[]) => void }) {
   const [platform, setPlatform] = useState<GridPlatform>('Instagram')
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [overIdx, setOverIdx] = useState<number | null>(null)
@@ -522,19 +543,19 @@ function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (po
               className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
               style={platform === p
                 ? { backgroundColor: PINK, color: '#000' }
-                : { border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)' }}>
+                : { border: `1px solid ${theme.border}`, color: theme.faint }}>
               {p}
             </button>
           ))}
         </div>
-        <span className="text-xs" style={{ color: saving ? 'rgba(255,255,255,0.4)' : saved ? PINK : 'transparent' }}>
+        <span className="text-xs" style={{ color: saving ? theme.faint : saved ? PINK : 'transparent' }}>
           {saving ? 'Saving...' : '✓ Dates updated'}
         </span>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="py-16 text-center rounded-2xl border border-dashed border-white/10">
-          <p className="text-white/30 text-sm">No posts assigned to {platform}</p>
+        <div className="py-16 text-center rounded-2xl" style={{ border: `1px dashed ${theme.border}` }}>
+          <p className="text-sm" style={{ color: theme.subtext }}>No posts assigned to {platform}</p>
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-1">
@@ -554,7 +575,7 @@ function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (po
                 style={{ opacity: isDragging ? 0.35 : 1, transition: 'opacity 0.15s' }}>
                 <div className="aspect-[3/4] overflow-hidden rounded-sm relative"
                   style={{
-                    backgroundColor: '#111',
+                    backgroundColor: theme.mediaBg,
                     outline: isOver ? `2px solid ${PINK}` : '2px solid transparent',
                     outlineOffset: '2px',
                     transition: 'outline 0.1s',
@@ -566,11 +587,11 @@ function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (po
                       // eslint-disable-next-line @next/next/no-img-element
                       : <img src={cover.file_url} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-white/20">?</div>
+                    <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: theme.faint }}>?</div>
                   )}
                   {/* Status dot */}
                   <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full shadow"
-                    style={{ backgroundColor: post.status === 'approved' ? PINK : (post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b' : 'rgba(255,255,255,0.4)' }} />
+                    style={{ backgroundColor: post.status === 'approved' ? PINK : (post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b' : 'rgba(180,180,180,0.6)' }} />
                   {/* Drag hint */}
                   <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
                     style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}>
@@ -578,7 +599,7 @@ function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (po
                   </div>
                 </div>
                 {post.scheduled_date && (
-                  <p className="text-center mt-1 text-xs text-white/30">
+                  <p className="text-center mt-1 text-xs" style={{ color: theme.faint }}>
                     {new Date(post.scheduled_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
                   </p>
                 )}
@@ -588,12 +609,12 @@ function AdminGrid({ posts, onUpdate }: { posts: PostWithAssets[]; onUpdate: (po
           {/* Pad to at least 9 cells */}
           {Array.from({ length: Math.max(0, 9 - filtered.length) }).map((_, i) => (
             <div key={`pad-${i}`}>
-              <div className="aspect-[3/4] rounded-sm" style={{ backgroundColor: '#111', opacity: 0.3 }} />
+              <div className="aspect-[3/4] rounded-sm" style={{ backgroundColor: theme.mediaBg, opacity: 0.3 }} />
             </div>
           ))}
         </div>
       )}
-      <p className="text-xs text-center text-white/20">Drag to reorder — dates shift automatically</p>
+      <p className="text-xs text-center" style={{ color: theme.faint }}>Drag to reorder — dates shift automatically</p>
     </div>
   )
 }
@@ -609,6 +630,18 @@ export default function CampaignDetailPage() {
   const [publishing, setPublishing] = useState(false)
   const [editingPost, setEditingPost] = useState<EditState | null>(null)
   const [pageTab, setPageTab] = useState<PageTab>('posts')
+  const [dark, setDark] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return localStorage.getItem('adminDark') !== 'false'
+  })
+
+  const t = makeTheme(dark)
+
+  function toggleDark() {
+    const next = !dark
+    setDark(next)
+    localStorage.setItem('adminDark', String(next))
+  }
 
   useEffect(() => {
     if (!id) return
@@ -678,11 +711,19 @@ export default function CampaignDetailPage() {
   const rejected = posts.filter(p => p.status === 'rejected').length
   const pending = posts.filter(p => p.status === 'pending').length
 
-  if (loading) return <div className="min-h-screen bg-black p-10 text-white/40 text-sm">Loading...</div>
-  if (!campaign) return <div className="min-h-screen bg-black p-10 text-white/40 text-sm">Campaign not found.</div>
+  if (loading) return (
+    <div className="min-h-screen p-10 text-sm transition-colors" style={{ backgroundColor: t.bg, color: t.faint }}>
+      Loading...
+    </div>
+  )
+  if (!campaign) return (
+    <div className="min-h-screen p-10 text-sm transition-colors" style={{ backgroundColor: t.bg, color: t.faint }}>
+      Campaign not found.
+    </div>
+  )
 
   return (
-    <div className="min-h-screen bg-black p-6 md:p-10">
+    <div className="min-h-screen transition-colors duration-200 p-6 md:p-10" style={{ backgroundColor: t.bg }}>
       {editingPost && campaign && (
         <EditModal state={editingPost} campaignId={campaign.id}
           onSave={updated => {
@@ -696,23 +737,30 @@ export default function CampaignDetailPage() {
       )}
 
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-center gap-4 mb-2">
-          <Link href="/admin" className="text-white/40 hover:text-white transition-colors text-sm">← Back</Link>
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <Link href="/admin"
+            className="text-sm transition-colors"
+            style={{ color: t.faint }}
+            onMouseOver={e => (e.currentTarget.style.color = t.text)}
+            onMouseOut={e => (e.currentTarget.style.color = t.faint)}>
+            ← Back
+          </Link>
+          <ThemeToggle dark={dark} onToggle={toggleDark} border={t.border} subtext={t.subtext} />
         </div>
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4 mb-8 flex-wrap">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-white">{campaign.title}</h1>
+              <h1 className="text-2xl font-bold" style={{ color: t.text }}>{campaign.title}</h1>
               {campaign.status === 'draft' && (
                 <span className="text-xs px-2.5 py-0.5 rounded-full font-medium"
-                  style={{ backgroundColor: '#ffffff10', color: '#ffffff40', border: '1px dashed rgba(255,255,255,0.2)' }}>
+                  style={{ backgroundColor: t.inputBg, color: t.faint, border: `1px dashed ${t.border}` }}>
                   Draft
                 </span>
               )}
             </div>
-            {campaign.client_name && <p className="text-white/40 text-sm mt-1">{campaign.client_name}</p>}
+            {campaign.client_name && <p className="text-sm mt-1" style={{ color: t.faint }}>{campaign.client_name}</p>}
           </div>
           <div className="flex gap-2 flex-wrap">
             {campaign.status === 'draft' ? (
@@ -728,9 +776,9 @@ export default function CampaignDetailPage() {
                   setCampaign(c => c ? { ...c, status: 'draft' } : c)
                 }}
                   className="px-4 py-2.5 rounded-full text-sm font-medium transition-colors"
-                  style={{ border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.4)' }}
-                  onMouseOver={e => (e.currentTarget.style.color = '#fff')}
-                  onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}>
+                  style={{ border: `1px solid ${t.border}`, color: t.subtext }}
+                  onMouseOver={e => (e.currentTarget.style.color = t.text)}
+                  onMouseOut={e => (e.currentTarget.style.color = t.subtext)}>
                   ↓ Move to draft
                 </button>
                 <button onClick={copyLink}
@@ -746,14 +794,14 @@ export default function CampaignDetailPage() {
         {/* Stats */}
         <div className="grid grid-cols-4 gap-3 mb-4">
           {[
-            { label: 'Pending', count: pending, color: '#ffffff40' },
+            { label: 'Pending', count: pending, color: t.faint },
             { label: 'Approved', count: approved, color: PINK },
             { label: 'Changes', count: changes, color: '#ff6b6b' },
             { label: 'Rejected', count: rejected, color: '#ff6b6b' },
           ].map(s => (
-            <div key={s.label} className="border border-white/10 rounded-xl p-4 text-center">
+            <div key={s.label} className="rounded-xl p-4 text-center" style={{ border: `1px solid ${t.border}`, backgroundColor: t.card }}>
               <div className="text-2xl font-bold" style={{ color: s.color }}>{s.count}</div>
-              <div className="text-xs text-white/30 mt-1">{s.label}</div>
+              <div className="text-xs mt-1" style={{ color: t.faint }}>{s.label}</div>
             </div>
           ))}
         </div>
@@ -773,20 +821,20 @@ export default function CampaignDetailPage() {
         {/* Tabs */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex gap-1">
-            {(['posts', 'grid'] as PageTab[]).map(t => (
-              <button key={t} onClick={() => setPageTab(t)}
+            {(['posts', 'grid'] as PageTab[]).map(tab => (
+              <button key={tab} onClick={() => setPageTab(tab)}
                 className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
-                style={pageTab === t ? { backgroundColor: PINK, color: '#000' } : { color: 'rgba(255,255,255,0.4)' }}>
-                {t === 'posts' ? 'Posts' : 'Grid'}
+                style={pageTab === tab ? { backgroundColor: PINK, color: '#000' } : { color: t.subtext }}>
+                {tab === 'posts' ? 'Posts' : 'Grid'}
               </button>
             ))}
           </div>
           {campaign.status === 'draft' && (
             <button onClick={openAddPost}
               className="text-xs px-4 py-1.5 rounded-full font-medium transition-colors"
-              style={{ backgroundColor: '#ffffff10', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.6)' }}
-              onMouseOver={e => (e.currentTarget.style.color = '#fff')}
-              onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.6)')}>
+              style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.subtext }}
+              onMouseOver={e => (e.currentTarget.style.color = t.text)}
+              onMouseOut={e => (e.currentTarget.style.color = t.subtext)}>
               + Add post
             </button>
           )}
@@ -799,9 +847,13 @@ export default function CampaignDetailPage() {
               const cover = post.assets[0]
               const isCarousel = post.assets.length > 1
               return (
-                <div key={post.id} className="border border-white/10 rounded-2xl p-4 flex gap-4"
-                  style={(post.status === 'changes_requested' || post.status === 'rejected') ? { borderColor: '#ff6b6b30' } : {}}>
-                  <div className="w-24 h-24 rounded-xl overflow-hidden bg-white/5 shrink-0 relative">
+                <div key={post.id} className="rounded-2xl p-4 flex gap-4"
+                  style={{
+                    border: `1px solid ${(post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b30' : t.border}`,
+                    backgroundColor: t.card,
+                  }}>
+                  <div className="w-24 h-24 rounded-xl overflow-hidden shrink-0 relative"
+                    style={{ backgroundColor: t.inputBg }}>
                     {cover ? (
                       cover.file_type === 'video'
                         ? cover.thumbnail_url
@@ -811,7 +863,7 @@ export default function CampaignDetailPage() {
                         // eslint-disable-next-line @next/next/no-img-element
                         : <img src={cover.file_url} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">no file</div>
+                      <div className="w-full h-full flex items-center justify-center text-xs" style={{ color: t.faint }}>no file</div>
                     )}
                     {isCarousel && (
                       <div className="absolute bottom-1 right-1 bg-black/60 rounded px-1 py-0.5 text-white text-[9px] font-medium">
@@ -827,14 +879,15 @@ export default function CampaignDetailPage() {
                         </span>
                       )}
                       {parsePlatforms(post.platform).map(p => (
-                        <span key={p} className="text-xs text-white/40 border border-white/10 rounded-full px-2 py-0.5">{p}</span>
+                        <span key={p} className="text-xs rounded-full px-2 py-0.5"
+                          style={{ border: `1px solid ${t.border}`, color: t.faint }}>{p}</span>
                       ))}
                       <span className="text-xs px-2.5 py-0.5 rounded-full font-medium"
                         style={
                           post.status === 'approved' ? { backgroundColor: '#f6a7d720', color: PINK }
                           : post.status === 'changes_requested' ? { backgroundColor: '#ff6b6b20', color: '#ff6b6b' }
                           : post.status === 'rejected' ? { backgroundColor: '#ff3b3b20', color: '#ff6b6b' }
-                          : { backgroundColor: '#ffffff15', color: '#ffffff60' }
+                          : { backgroundColor: t.inputBg, color: t.subtext }
                         }>
                         {post.status === 'approved' ? '✓ Approved' : post.status === 'changes_requested' ? '⚡ Changes' : post.status === 'rejected' ? '✕ Rejected' : '· Pending'}
                       </span>
@@ -844,7 +897,7 @@ export default function CampaignDetailPage() {
                         📅 {new Date(post.scheduled_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </p>
                     )}
-                    {post.caption && <p className="text-sm text-white/60 leading-relaxed line-clamp-2">{post.caption}</p>}
+                    {post.caption && <p className="text-sm leading-relaxed line-clamp-2" style={{ color: t.subtext }}>{post.caption}</p>}
                     {(post.status === 'changes_requested' || post.status === 'rejected') && (
                       <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: '#ff6b6b12', border: '1px solid #ff6b6b25' }}>
                         <span style={{ color: '#ff6b6b80' }}>Client note: </span>
@@ -854,9 +907,9 @@ export default function CampaignDetailPage() {
                     <div className="flex gap-2 mt-2 flex-wrap">
                       <button onClick={() => openEdit(post)}
                         className="text-xs px-3 py-1 rounded-full border transition-colors"
-                        style={{ borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.4)' }}
-                        onMouseOver={e => (e.currentTarget.style.color = '#fff')}
-                        onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}>
+                        style={{ borderColor: t.border, color: t.faint }}
+                        onMouseOver={e => (e.currentTarget.style.color = t.text)}
+                        onMouseOut={e => (e.currentTarget.style.color = t.faint)}>
                         ✎ Edit
                       </button>
                       {(post.status === 'changes_requested' || post.status === 'rejected') && (
@@ -878,14 +931,14 @@ export default function CampaignDetailPage() {
 
         {/* Grid tab */}
         {pageTab === 'grid' && (
-          <AdminGrid posts={posts} onUpdate={setPosts} />
+          <AdminGrid posts={posts} theme={t} onUpdate={setPosts} />
         )}
 
         {/* Client link */}
         {campaign.status === 'active' && (
-          <div className="mt-8 border border-white/10 rounded-2xl p-5">
-            <p className="text-xs uppercase tracking-widest text-white/30 mb-2">Client review link</p>
-            <p className="text-sm font-mono text-white/60 break-all">
+          <div className="mt-8 rounded-2xl p-5" style={{ border: `1px solid ${t.border}` }}>
+            <p className="text-xs uppercase tracking-widest mb-2" style={{ color: t.faint }}>Client review link</p>
+            <p className="text-sm font-mono break-all" style={{ color: t.subtext }}>
               {typeof window !== 'undefined' ? window.location.origin : ''}/review/{campaign.token}
             </p>
           </div>

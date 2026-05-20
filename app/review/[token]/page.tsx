@@ -236,7 +236,7 @@ export default function ReviewPage() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [tab, setTab] = useState<Tab>('review')
-  const [dark, setDark] = useState(true)
+  const [dark, setDark] = useState(false)
 
   const theme = makeTheme(dark)
 
