@@ -197,7 +197,7 @@ function GridPreview({ posts, theme }: { posts: PostWithUI[]; theme: Theme }) {
                     <div className="w-full h-full flex items-center justify-center" style={{ color: theme.faint }}>?</div>
                   )}
                   <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full shadow" style={{
-                    backgroundColor: post.status === 'approved' ? PINK : (post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b' : 'rgba(255,255,255,0.5)'
+                    backgroundColor: post.status === 'approved' ? PINK : (post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b' : theme.faint
                   }} />
                   {!isCarousel && cover?.file_type === 'video' && (
                     <div className="absolute bottom-1.5 left-1.5">
@@ -214,7 +214,7 @@ function GridPreview({ posts, theme }: { posts: PostWithUI[]; theme: Theme }) {
           {/* Pad to at least 9 cells */}
           {Array.from({ length: Math.max(0, 9 - filtered.length) }).map((_, i) => (
             <div key={`pad-${i}`} className="relative">
-              <div className="aspect-[3/4] rounded-sm" style={{ backgroundColor: theme.mediaBg, opacity: 0.3 }} />
+              <div className="aspect-[3/4] rounded-sm" style={{ backgroundColor: theme.mediaBg, border: `1px solid ${theme.border}` }} />
             </div>
           ))}
         </div>
