@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const PINK = '#f6a7d7'
 
@@ -9,9 +9,11 @@ export type CarouselAsset = {
   file_url: string
   file_type: 'image' | 'video'
   thumbnail_url?: string | null
+  crop_x?: number | null
+  crop_y?: number | null
 }
 
-function VideoPlayer({ src, poster }: { src: string; poster?: string | null }) {
+function VideoPlayer({ src, poster, objectPosition, onMeta }: { src: string; poster?: string | null; objectPosition: string; onMeta?: (w: number, h: number) => void }) {
   const ref = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
 
@@ -22,8 +24,12 @@ function VideoPlayer({ src, poster }: { src: string; poster?: string | null }) {
   }
 
   return (
-    <div className="relative w-full cursor-pointer" onClick={toggle}>
-      <video ref={ref} src={src} poster={poster ?? undefined} className="w-full max-h-[70vh] object-contain" playsInline onEnded={() => setPlaying(false)} />
+    <div className="relative w-full h-full cursor-pointer" onClick={toggle}>
+      <video ref={ref} src={src} poster={poster ?? undefined}
+        className="w-full h-full object-cover"
+        style={{ objectPosition }}
+        playsInline onEnded={() => setPlaying(false)}
+        onLoadedMetadata={e => { const v = e.currentTarget; if (onMeta && v.videoWidth && v.videoHeight) onMeta(v.videoWidth, v.videoHeight) }} />
       {!playing && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="w-16 h-16 rounded-full flex items-center justify-center backdrop-blur-sm" style={{ backgroundColor: '#f6a7d730', border: `2px solid ${PINK}` }}>
@@ -37,10 +43,31 @@ function VideoPlayer({ src, poster }: { src: string; poster?: string | null }) {
 
 export function MediaCarousel({ assets, mediaBg }: { assets: CarouselAsset[]; mediaBg: string }) {
   const [idx, setIdx] = useState(0)
+  const [firstAspect, setFirstAspect] = useState<number | null>(null)
   const asset = assets[idx]
+  const firstAsset = assets[0]
+
+  // Detect first asset's aspect ratio so the container can lock to it.
+  // Images: load via Image(). Videos: default to 9:16 while we wait — the actual
+  // dimensions come back via the rendered <video>'s onLoadedMetadata callback below.
+  useEffect(() => {
+    if (!firstAsset) return
+    if (firstAsset.file_type === 'image') {
+      setFirstAspect(null)
+      const img = new Image()
+      img.onload = () => setFirstAspect(img.naturalWidth / img.naturalHeight)
+      img.src = firstAsset.file_url
+    } else {
+      setFirstAspect(9 / 16)
+    }
+  }, [firstAsset?.id, firstAsset?.file_url, firstAsset?.file_type])
+
   if (!asset) return null
 
   const isMulti = assets.length > 1
+  const cropX = asset.crop_x ?? 50
+  const cropY = asset.crop_y ?? 50
+  const objectPosition = `${cropX}% ${cropY}%`
 
   return (
     <div className="relative select-none" style={{ backgroundColor: mediaBg }}>
@@ -52,12 +79,24 @@ export function MediaCarousel({ assets, mediaBg }: { assets: CarouselAsset[]; me
         </div>
       )}
 
-      {/* Media */}
-      {asset.file_type === 'video'
-        ? <VideoPlayer src={asset.file_url} poster={asset.thumbnail_url} key={asset.id} />
-        // eslint-disable-next-line @next/next/no-img-element
-        : <img src={asset.file_url} alt="" className="w-full max-h-[70vh] object-contain" key={asset.id} />
-      }
+      {/* Media frame — locked to first asset's aspect ratio so all images crop to match.
+          For portrait (aspect < 1), we also cap maxWidth = 70vh * aspect, so that maxHeight: 70vh
+          doesn't collapse the box into a near-square (which would crop the video). */}
+      <div className="relative w-full mx-auto overflow-hidden" style={{
+        aspectRatio: firstAspect ?? undefined,
+        maxHeight: '70vh',
+        maxWidth: firstAspect && firstAspect < 1 ? `calc(70vh * ${firstAspect})` : undefined,
+      }}>
+        {asset.file_type === 'video'
+          ? <VideoPlayer src={asset.file_url} poster={asset.thumbnail_url} objectPosition={objectPosition} key={asset.id}
+              onMeta={asset.id === firstAsset?.id ? (w, h) => setFirstAspect(w / h) : undefined} />
+          // eslint-disable-next-line @next/next/no-img-element
+          : <img src={asset.file_url} alt=""
+              className="w-full h-full object-cover"
+              style={{ objectPosition }}
+              key={asset.id} />
+        }
+      </div>
 
       {/* Left / right arrows */}
       {isMulti && (
@@ -75,7 +114,7 @@ export function MediaCarousel({ assets, mediaBg }: { assets: CarouselAsset[]; me
         </>
       )}
 
-      {/* Thumbnail strip — replaces dot indicators */}
+      {/* Thumbnail strip */}
       {isMulti && (
         <div className="flex gap-1.5 px-3 py-2.5 overflow-x-auto" style={{ backgroundColor: mediaBg }}>
           {assets.map((a, i) => (
@@ -89,10 +128,10 @@ export function MediaCarousel({ assets, mediaBg }: { assets: CarouselAsset[]; me
               {a.file_type === 'video'
                 ? a.thumbnail_url
                   // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={a.thumbnail_url} alt="" className="w-full h-full object-cover" />
-                  : <video src={a.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                  ? <img src={a.thumbnail_url} alt="" className="w-full h-full object-cover" style={{ objectPosition: `${a.crop_x ?? 50}% ${a.crop_y ?? 50}%` }} />
+                  : <div className="w-full h-full flex items-center justify-center text-xs" style={{ color: '#999' }}>🎥</div>
                 // eslint-disable-next-line @next/next/no-img-element
-                : <img src={a.file_url} alt="" className="w-full h-full object-cover" />
+                : <img src={a.file_url} alt="" className="w-full h-full object-cover" style={{ objectPosition: `${a.crop_x ?? 50}% ${a.crop_y ?? 50}%` }} />
               }
             </button>
           ))}

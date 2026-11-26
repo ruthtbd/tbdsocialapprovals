@@ -1,32 +1,15 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { useState, useCallback, useRef, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { supabase, type Campaign } from '@/lib/supabase'
 
 const PINK = '#f6a7d7'
 const MAX_FILE_MB = 500
 
-type Theme = { bg: string; card: string; border: string; text: string; subtext: string; faint: string; inputBg: string; dark: boolean }
+type Theme = { bg: string; card: string; border: string; text: string; subtext: string; faint: string; inputBg: string }
 
-function makeTheme(dark: boolean): Theme {
-  return dark
-    ? { bg: '#0a0a0a', card: '#111', border: 'rgba(255,255,255,0.1)', text: '#fff', subtext: 'rgba(255,255,255,0.5)', faint: 'rgba(255,255,255,0.25)', inputBg: 'rgba(255,255,255,0.06)', dark: true }
-    : { bg: '#f4f4f4', card: '#fff', border: 'rgba(0,0,0,0.08)', text: '#0a0a0a', subtext: 'rgba(0,0,0,0.5)', faint: 'rgba(0,0,0,0.3)', inputBg: 'rgba(0,0,0,0.04)', dark: false }
-}
-
-function ThemeToggle({ dark, onToggle, border, subtext }: { dark: boolean; onToggle: () => void; border: string; subtext: string }) {
-  return (
-    <button onClick={onToggle}
-      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
-      style={{ border: `1px solid ${border}` }}>
-      {dark
-        ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: subtext }}><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-        : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: subtext }}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      }
-    </button>
-  )
-}
+const THEME: Theme = { bg: '#fff', card: '#fff', border: 'rgba(0,0,0,0.1)', text: '#000', subtext: '#000', faint: '#000', inputBg: 'rgba(0,0,0,0.04)' }
 
 type AssetDraft = {
   id: string
@@ -64,7 +47,11 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
   function togglePlay() {
     if (!videoRef.current) return
     if (playing) { videoRef.current.pause(); setPlaying(false) }
-    else { videoRef.current.play(); setPlaying(true) }
+    else {
+      // play() returns a promise that rejects if the video unmounts or is interrupted —
+      // swallow the "play() was interrupted" noise so it doesn't break the upload flow
+      videoRef.current.play().then(() => setPlaying(true)).catch(() => {})
+    }
   }
 
   async function capture() {
@@ -108,11 +95,11 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
       style={{ backgroundColor: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(8px)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-full max-w-2xl rounded-2xl overflow-hidden"
-        style={{ backgroundColor: '#0a0a0a', border: '1px solid rgba(255,255,255,0.12)' }}>
+        style={{ backgroundColor: '#fff', border: '1px solid rgba(0,0,0,0.1)' }}>
 
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10">
-          <h3 className="text-sm font-semibold text-white">Pick thumbnail</h3>
-          <button onClick={onClose} className="text-white/40 hover:text-white transition-colors text-xl leading-none">✕</button>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-black/10">
+          <h3 className="text-sm font-semibold text-black">Pick thumbnail</h3>
+          <button onClick={onClose} className="text-black/40 hover:text-black transition-colors text-xl leading-none">✕</button>
         </div>
 
         <div className="relative bg-black cursor-pointer" onClick={togglePlay}>
@@ -167,7 +154,7 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
               </button>
               <button type="button" onClick={() => fileInputRef.current?.click()}
                 className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
-                style={{ border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}>
+                style={{ border: '1px solid rgba(0,0,0,0.15)', color: 'rgba(0,0,0,0.5)' }}>
                 Upload image
               </button>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
@@ -235,9 +222,40 @@ function PlatformPills({ selected, theme, onChange }: { selected: string[]; them
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewCampaignPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen p-10 text-sm" style={{ color: '#888' }}>Loading…</div>}>
+      <NewCampaignPageInner />
+    </Suspense>
+  )
+}
+
+function NewCampaignPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const addToCampaignId = searchParams.get('addTo')
+  const isAddingToExisting = !!addToCampaignId
+
+  const [existingCampaign, setExistingCampaign] = useState<Campaign | null>(null)
+  const [existingPostCount, setExistingPostCount] = useState(0)
   const [title, setTitle] = useState('')
   const [clientName, setClientName] = useState('')
+
+  // When adding to an existing campaign, load its details + count of existing posts (for position offset)
+  useEffect(() => {
+    if (!addToCampaignId) return
+    (async () => {
+      const [{ data: c }, { count }] = await Promise.all([
+        supabase.from('campaigns').select('*').eq('id', addToCampaignId).single(),
+        supabase.from('posts').select('*', { count: 'exact', head: true }).eq('campaign_id', addToCampaignId).is('deleted_at', null),
+      ])
+      if (c) {
+        setExistingCampaign(c)
+        setTitle(c.title)
+        setClientName(c.client_name || '')
+      }
+      setExistingPostCount(count || 0)
+    })()
+  }, [addToCampaignId])
   const [posts, setPosts] = useState<PostDraft[]>([])
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -245,18 +263,7 @@ export default function NewCampaignPage() {
   const [dragOver, setDragOver] = useState(false)
   const [thumbPicker, setThumbPicker] = useState<{ postId: string; assetId: string; src: string; current?: string } | null>(null)
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
-  const [dark, setDark] = useState(() => {
-    if (typeof window === 'undefined') return true
-    return localStorage.getItem('adminDark') !== 'false'
-  })
-
-  const t = makeTheme(dark)
-
-  function toggleDark() {
-    const next = !dark
-    setDark(next)
-    localStorage.setItem('adminDark', String(next))
-  }
+  const t = THEME
 
   function addFilesAsPosts(files: FileList | null) {
     if (!files) return
@@ -318,21 +325,28 @@ export default function NewCampaignPage() {
 
   async function handleSubmit(e: React.FormEvent, asDraft = false) {
     e.preventDefault()
-    if (!title.trim() || posts.length === 0) return
+    if (posts.length === 0) return
+    if (!isAddingToExisting && !title.trim()) return
     setUploading(true); setUploadErrors([])
 
-    const token = generateToken()
-    setUploadStatus('Creating campaign…')
-    const { data: campaign, error: campaignError } = await supabase
-      .from('campaigns')
-      .insert({ title: title.trim(), client_name: clientName.trim() || null, token, status: asDraft ? 'draft' : 'active' })
-      .select().single()
-
-    if (campaignError || !campaign) {
-      alert('Failed to create campaign: ' + campaignError?.message)
-      setUploading(false); return
+    let campaign: Campaign | null = existingCampaign
+    if (!isAddingToExisting) {
+      const token = generateToken()
+      setUploadStatus('Creating campaign…')
+      const { data: created, error: campaignError } = await supabase
+        .from('campaigns')
+        .insert({ title: title.trim(), client_name: clientName.trim() || null, token, status: asDraft ? 'draft' : 'active' })
+        .select().single()
+      if (campaignError || !created) {
+        alert('Failed to create campaign: ' + campaignError?.message)
+        setUploading(false); return
+      }
+      campaign = created
     }
+    if (!campaign) { setUploading(false); return }
+    const targetCampaign = campaign
 
+    const positionOffset = isAddingToExisting ? existingPostCount : 0
     const errors: string[] = []
 
     for (let i = 0; i < posts.length; i++) {
@@ -343,12 +357,12 @@ export default function NewCampaignPage() {
       const { data: postRecord, error: postError } = await supabase
         .from('posts')
         .insert({
-          campaign_id: campaign.id,
+          campaign_id: targetCampaign.id,
           caption: post.caption || null,
           platform: post.platforms.length > 0 ? JSON.stringify(post.platforms) : null,
           scheduled_date: post.scheduledDate || null,
-          position: i,
-          status: 'pending',
+          position: positionOffset + i,
+          status: null,
         })
         .select().single()
 
@@ -360,13 +374,13 @@ export default function NewCampaignPage() {
       for (let j = 0; j < post.assets.length; j++) {
         const asset = post.assets[j]
         const ext = asset.file.name.split('.').pop()
-        const path = `${campaign.id}/${postRecord.id}/${asset.id}.${ext}`
+        const path = `${targetCampaign.id}/${postRecord.id}/${asset.id}.${ext}`
 
         const { error: uploadError } = await supabase.storage
           .from('posts')
           .upload(path, asset.file, {
             contentType: asset.file.type,
-            cacheControl: '3600',
+            cacheControl: '2592000',
             upsert: false,
           })
 
@@ -381,8 +395,8 @@ export default function NewCampaignPage() {
         let thumbnailUrl: string | null = null
         if (asset.fileType === 'video' && asset.thumbnailDataUrl) {
           const blob = await (await fetch(asset.thumbnailDataUrl)).blob()
-          const thumbPath = `${campaign.id}/${postRecord.id}/${asset.id}_thumb.jpg`
-          const { error: te } = await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600' })
+          const thumbPath = `${targetCampaign.id}/${postRecord.id}/${asset.id}_thumb.jpg`
+          const { error: te } = await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '2592000' })
           if (!te) thumbnailUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
         }
 
@@ -398,12 +412,12 @@ export default function NewCampaignPage() {
 
     setUploadProgress(100)
     if (errors.length > 0) setUploadErrors(errors)
-    else router.push(`/admin/campaign/${campaign.id}`)
+    else router.push(`/admin/campaign/${campaign!.id}`)
     setUploading(false)
   }
 
   return (
-    <div className="min-h-screen transition-colors duration-200 p-6 md:p-10" style={{ backgroundColor: t.bg }}>
+    <div className="min-h-screen transition-colors duration-200 p-6 md:p-10" style={{ backgroundColor: t.bg, color: t.text }}>
       {thumbPicker && (
         <ThumbnailPickerModal
           src={thumbPicker.src}
@@ -428,30 +442,33 @@ export default function NewCampaignPage() {
               onMouseOut={e => (e.currentTarget.style.color = t.faint)}>
               ← Back
             </button>
-            <h1 className="text-xl font-bold" style={{ color: PINK }}>New Campaign</h1>
+            <h1 className="text-xl font-bold" style={{ color: PINK }}>
+              {isAddingToExisting ? `Add posts${existingCampaign ? ` to ${existingCampaign.title}` : ''}` : 'New Campaign'}
+            </h1>
           </div>
-          <ThemeToggle dark={dark} onToggle={toggleDark} border={t.border} subtext={t.subtext} />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs uppercase tracking-widest mb-2 block" style={{ color: t.faint }}>Campaign Title *</label>
-              <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. May Content" required
-                className="w-full rounded-xl px-4 py-3 focus:outline-none transition-colors"
-                style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text }}
-                onFocus={e => (e.currentTarget.style.borderColor = PINK)}
-                onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
+          {!isAddingToExisting && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs uppercase tracking-widest mb-2 block" style={{ color: t.faint }}>Campaign Title *</label>
+                <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. May Content" required
+                  className="w-full rounded-xl px-4 py-3 focus:outline-none transition-colors"
+                  style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text }}
+                  onFocus={e => (e.currentTarget.style.borderColor = PINK)}
+                  onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-widest mb-2 block" style={{ color: t.faint }}>Client Name</label>
+                <input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="e.g. Acme Co"
+                  className="w-full rounded-xl px-4 py-3 focus:outline-none transition-colors"
+                  style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text }}
+                  onFocus={e => (e.currentTarget.style.borderColor = PINK)}
+                  onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
+              </div>
             </div>
-            <div>
-              <label className="text-xs uppercase tracking-widest mb-2 block" style={{ color: t.faint }}>Client Name</label>
-              <input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="e.g. Acme Co"
-                className="w-full rounded-xl px-4 py-3 focus:outline-none transition-colors"
-                style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text }}
-                onFocus={e => (e.currentTarget.style.borderColor = PINK)}
-                onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
-            </div>
-          </div>
+          )}
 
           {/* Drop zone */}
           <div>
@@ -552,7 +569,7 @@ export default function NewCampaignPage() {
                     <input type="date" value={post.scheduledDate}
                       onChange={e => updatePost(post.id, 'scheduledDate', e.target.value)}
                       className="w-full rounded-lg px-3 py-1.5 text-sm focus:outline-none transition-colors"
-                      style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text, colorScheme: dark ? 'dark' : 'light' }}
+                      style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text, colorScheme: 'light' }}
                       onFocus={e => (e.currentTarget.style.borderColor = PINK)}
                       onBlur={e => (e.currentTarget.style.borderColor = t.border)} />
                   </div>
@@ -598,16 +615,18 @@ export default function NewCampaignPage() {
               </div>
             ) : uploadErrors.length === 0 ? (
               <div className="flex gap-3">
-                <button type="button" onClick={e => handleSubmit(e, true)}
-                  disabled={!title.trim() || posts.length === 0}
-                  className="flex-1 py-3 rounded-full font-semibold transition-opacity hover:opacity-80 disabled:opacity-30"
-                  style={{ border: `1px solid ${t.border}`, color: t.subtext }}>
-                  Save as Draft
-                </button>
-                <button type="submit" disabled={!title.trim() || posts.length === 0}
+                {!isAddingToExisting && (
+                  <button type="button" onClick={e => handleSubmit(e, true)}
+                    disabled={!title.trim() || posts.length === 0}
+                    className="flex-1 py-3 rounded-full font-semibold transition-opacity hover:opacity-80 disabled:opacity-30"
+                    style={{ border: `1px solid ${t.border}`, color: t.subtext }}>
+                    Save as Draft
+                  </button>
+                )}
+                <button type="submit" disabled={(!isAddingToExisting && !title.trim()) || posts.length === 0}
                   className="flex-1 py-3 rounded-full font-semibold text-black transition-opacity hover:opacity-80 disabled:opacity-30"
                   style={{ backgroundColor: PINK }}>
-                  Publish ({posts.length} post{posts.length !== 1 ? 's' : ''})
+                  {isAddingToExisting ? 'Add' : 'Publish'} ({posts.length} post{posts.length !== 1 ? 's' : ''})
                 </button>
               </div>
             ) : null}

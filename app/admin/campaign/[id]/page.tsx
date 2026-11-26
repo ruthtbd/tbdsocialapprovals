@@ -3,32 +3,15 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { parsePlatforms, fetchPostsWithAssets, type Campaign, type PostWithAssets, type PostAsset } from '@/lib/supabase'
+import { parsePlatforms, fetchPostsWithAssets, generateToken, computeAggregateStatus, type Campaign, type PostWithAssets, type PostAsset, type Reviewer, type PostReview, type PostStatus } from '@/lib/supabase'
 import { supabase } from '@/lib/supabase'
 
 const PLATFORMS = ['Instagram', 'TikTok', 'Facebook', 'LinkedIn', 'Twitter/X', 'YouTube', 'Other']
 const PINK = '#f6a7d7'
 
-type Theme = { bg: string; card: string; border: string; text: string; subtext: string; faint: string; inputBg: string; mediaBg: string; dark: boolean }
+type Theme = { bg: string; card: string; border: string; text: string; subtext: string; faint: string; inputBg: string; mediaBg: string }
 
-function makeTheme(dark: boolean): Theme {
-  return dark
-    ? { bg: '#0a0a0a', card: '#111', border: 'rgba(255,255,255,0.1)', text: '#fff', subtext: 'rgba(255,255,255,0.5)', faint: 'rgba(255,255,255,0.25)', inputBg: 'rgba(255,255,255,0.06)', mediaBg: '#111', dark: true }
-    : { bg: '#f4f4f4', card: '#fff', border: 'rgba(0,0,0,0.08)', text: '#0a0a0a', subtext: 'rgba(0,0,0,0.5)', faint: 'rgba(0,0,0,0.3)', inputBg: 'rgba(0,0,0,0.04)', mediaBg: '#e0e0e0', dark: false }
-}
-
-function ThemeToggle({ dark, onToggle, border, subtext }: { dark: boolean; onToggle: () => void; border: string; subtext: string }) {
-  return (
-    <button onClick={onToggle}
-      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
-      style={{ border: `1px solid ${border}` }}>
-      {dark
-        ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: subtext }}><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-        : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: subtext }}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      }
-    </button>
-  )
-}
+const THEME: Theme = { bg: '#fff', card: '#fff', border: 'rgba(0,0,0,0.1)', text: '#000', subtext: '#000', faint: '#000', inputBg: 'rgba(0,0,0,0.04)', mediaBg: '#fff' }
 
 type NewAsset = { id: string; file: File; preview: string; fileType: 'image' | 'video'; thumbnailDataUrl?: string }
 type EditState = {
@@ -99,7 +82,11 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
   function togglePlay() {
     if (!videoRef.current) return
     if (playing) { videoRef.current.pause(); setPlaying(false) }
-    else { videoRef.current.play(); setPlaying(true) }
+    else {
+      // play() returns a promise that rejects if the video unmounts or is interrupted —
+      // swallow the "play() was interrupted" noise so it doesn't break the upload flow
+      videoRef.current.play().then(() => setPlaying(true)).catch(() => {})
+    }
   }
 
   async function capture() {
@@ -155,11 +142,11 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
       style={{ backgroundColor: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(8px)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-full max-w-2xl rounded-2xl overflow-hidden"
-        style={{ backgroundColor: '#0a0a0a', border: '1px solid rgba(255,255,255,0.12)' }}>
+        style={{ backgroundColor: '#fff', border: '1px solid rgba(0,0,0,0.1)' }}>
 
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10">
-          <h3 className="text-sm font-semibold text-white">Pick thumbnail</h3>
-          <button onClick={onClose} className="text-white/40 hover:text-white transition-colors text-xl leading-none">✕</button>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-black/10">
+          <h3 className="text-sm font-semibold text-black">Pick thumbnail</h3>
+          <button onClick={onClose} className="text-black/40 hover:text-black transition-colors text-xl leading-none">✕</button>
         </div>
 
         {/* Video — this IS the live preview, no canvas lag */}
@@ -232,7 +219,7 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
               </button>
               <button onClick={() => fileInputRef.current?.click()}
                 className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
-                style={{ border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}>
+                style={{ border: '1px solid rgba(0,0,0,0.15)', color: 'rgba(0,0,0,0.5)' }}>
                 Upload image
               </button>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
@@ -246,6 +233,93 @@ function ThumbnailPickerModal({ src, currentThumb, onCapture, onClose }: {
   )
 }
 
+// ─── Crop / Reposition Modal ──────────────────────────────────────────────────
+
+function CropModal({ src, isVideo, frameAspect, initialX, initialY, onSave, onClose }: {
+  src: string
+  isVideo: boolean
+  frameAspect: number // width / height ratio of first image
+  initialX: number
+  initialY: number
+  onSave: (x: number, y: number) => void
+  onClose: () => void
+}) {
+  const [x, setX] = useState(initialX)
+  const [y, setY] = useState(initialY)
+  const dragRef = useRef<{ startX: number; startY: number; startCropX: number; startCropY: number } | null>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (!frameRef.current) return
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startCropX: x, startCropY: y }
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragRef.current || !frameRef.current) return
+    const rect = frameRef.current.getBoundingClientRect()
+    const dx = e.clientX - dragRef.current.startX
+    const dy = e.clientY - dragRef.current.startY
+    // Drag direction is inverted: moving mouse right reveals more of the LEFT side of image
+    // (object-position 0% = left edge of image at left edge of frame)
+    // So drag right = decrease X. Range of X is 0-100 and corresponds to ~full image width.
+    const nextX = Math.min(100, Math.max(0, dragRef.current.startCropX - (dx / rect.width) * 100))
+    const nextY = Math.min(100, Math.max(0, dragRef.current.startCropY - (dy / rect.height) * 100))
+    setX(nextX)
+    setY(nextY)
+  }
+
+  function onPointerUp() {
+    dragRef.current = null
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="w-full max-w-sm rounded-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        style={{ backgroundColor: '#fff', border: '1px solid rgba(0,0,0,0.1)' }}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-black/10 shrink-0">
+          <h3 className="text-sm font-semibold text-black">Reposition · drag to move</h3>
+          <button onClick={onClose} className="text-black/40 hover:text-black transition-colors text-xl leading-none">✕</button>
+        </div>
+
+        <div className="p-4 overflow-y-auto">
+          <div ref={frameRef}
+            className="relative mx-auto overflow-hidden rounded-xl select-none touch-none"
+            style={{ aspectRatio: frameAspect, maxHeight: '55vh', maxWidth: '100%', width: frameAspect > 1 ? '100%' : 'auto', backgroundColor: '#f3f3f3', cursor: 'grab' }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}>
+            {isVideo
+              ? <video src={src} className="w-full h-full object-cover pointer-events-none" style={{ objectPosition: `${x}% ${y}%` }} muted preload="metadata" />
+              // eslint-disable-next-line @next/next/no-img-element
+              : <img src={src} alt="" className="w-full h-full object-cover pointer-events-none" style={{ objectPosition: `${x}% ${y}%` }} />
+            }
+          </div>
+
+          <div className="flex items-center gap-2 mt-3 text-xs" style={{ color: 'rgba(0,0,0,0.5)' }}>
+            <span>X: {Math.round(x)}%</span>
+            <span>Y: {Math.round(y)}%</span>
+            <button onClick={() => { setX(50); setY(50) }} className="ml-auto px-2.5 py-1 rounded-full border text-[11px]" style={{ borderColor: 'rgba(0,0,0,0.15)' }}>
+              Reset to center
+            </button>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 border-t border-black/10 flex gap-2 shrink-0">
+          <button onClick={onClose} className="flex-1 py-2 rounded-full text-sm font-medium"
+            style={{ border: '1px solid rgba(0,0,0,0.15)', color: 'rgba(0,0,0,0.5)' }}>Cancel</button>
+          <button onClick={() => { onSave(x, y); onClose() }}
+            className="flex-1 py-2 rounded-full text-sm font-semibold text-black"
+            style={{ backgroundColor: PINK }}>Save</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
 
 function EditModal({ state, campaignId, onSave, onClose }: {
@@ -254,15 +328,53 @@ function EditModal({ state, campaignId, onSave, onClose }: {
   onSave: (updated: PostWithAssets) => void
   onClose: () => void
 }) {
+  type AssetItem =
+    | { kind: 'existing'; data: PostAsset }
+    | { kind: 'new'; data: NewAsset }
+
   const [caption, setCaption] = useState(state.caption)
   const [platforms, setPlatforms] = useState(state.platforms)
   const [scheduledDate, setScheduledDate] = useState(state.scheduledDate)
-  const [existingAssets, setExistingAssets] = useState(state.existingAssets)
-  const [newAssets, setNewAssets] = useState<NewAsset[]>([])
+  const [assets, setAssets] = useState<AssetItem[]>(
+    state.existingAssets.map(a => ({ kind: 'existing' as const, data: a }))
+  )
   const [thumbEdits, setThumbEdits] = useState<Record<string, string>>({}) // assetId → new dataUrl
   const [thumbPickerAsset, setThumbPickerAsset] = useState<{ id: string; src: string; current?: string | null } | null>(null)
+  const [cropEdits, setCropEdits] = useState<Record<string, { x: number; y: number }>>({}) // assetId → crop
+  const [cropAsset, setCropAsset] = useState<{ id: string; src: string; isVideo: boolean; x: number; y: number } | null>(null)
+  const [firstAssetAspect, setFirstAssetAspect] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+  const [uploadErrors, setUploadErrors] = useState<string[]>([])
+  const [assetDragIdx, setAssetDragIdx] = useState<number | null>(null)
+  const [assetOverIdx, setAssetOverIdx] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Detect first asset's aspect ratio whenever it changes (used by CropModal frame)
+  useEffect(() => {
+    const first = assets[0]
+    if (!first) { setFirstAssetAspect(null); return }
+    const src = first.kind === 'existing'
+      ? (first.data.file_type === 'video' ? (thumbEdits[first.data.id] || first.data.thumbnail_url || first.data.file_url) : first.data.file_url)
+      : (first.data.fileType === 'video' ? (first.data.thumbnailDataUrl || first.data.preview) : first.data.preview)
+    if (!src) return
+    const img = new Image()
+    img.onload = () => setFirstAssetAspect(img.naturalWidth / img.naturalHeight)
+    img.src = src
+  }, [assets, thumbEdits])
+
+  function reorderAssets(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return
+    setAssets(prev => {
+      const next = [...prev]
+      const [moved] = next.splice(fromIdx, 1)
+      next.splice(toIdx, 0, moved)
+      return next
+    })
+  }
+
+  function removeAsset(itemId: string) {
+    setAssets(prev => prev.filter(a => a.data.id !== itemId))
+  }
 
   function togglePlatform(p: string) {
     setPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])
@@ -270,18 +382,30 @@ function EditModal({ state, campaignId, onSave, onClose }: {
 
   function addFiles(files: FileList | null) {
     if (!files) return
-    const added: NewAsset[] = Array.from(files)
+    const added: AssetItem[] = Array.from(files)
       .filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'))
       .map(f => ({
-        id: Math.random().toString(36).slice(2),
-        file: f,
-        preview: URL.createObjectURL(f),
-        fileType: f.type.startsWith('video/') ? 'video' : 'image',
+        kind: 'new' as const,
+        data: {
+          id: Math.random().toString(36).slice(2),
+          file: f,
+          preview: URL.createObjectURL(f),
+          fileType: f.type.startsWith('video/') ? 'video' : 'image',
+        },
       }))
-    setNewAssets(prev => [...prev, ...added])
+    setAssets(prev => [...prev, ...added])
   }
 
-  const totalAssets = existingAssets.length + newAssets.length
+  function updateNewAssetThumb(itemId: string, dataUrl: string) {
+    setAssets(prev => prev.map(a =>
+      a.kind === 'new' && a.data.id === itemId
+        ? { ...a, data: { ...a.data, thumbnailDataUrl: dataUrl } }
+        : a
+    ))
+  }
+
+  const totalAssets = assets.length
+  const newAssetsCount = assets.filter(a => a.kind === 'new').length
 
   async function handleSave() {
     setSaving(true)
@@ -296,43 +420,84 @@ function EditModal({ state, campaignId, onSave, onClose }: {
         platform: platforms.length > 0 ? JSON.stringify(platforms) : null,
         scheduled_date: scheduledDate || null,
         position: state.newPostPosition ?? 0,
-        status: 'pending',
+        status: null,
         feedback: null,
       }).select().single()
-      if (error || !newPost) { setSaving(false); return }
+      if (error || !newPost) {
+        setSaving(false)
+        alert(`Could not save new post — ${error?.message || 'unknown error'}.\n\nIf this mentions a missing column, run the latest migration in supabase-schema.sql.`)
+        return
+      }
       postId = newPost.id
     } else {
-      // UPDATE existing post
+      // UPDATE existing post — edits reset review state
       await supabase.from('posts').update({
         caption: caption || null,
         platform: platforms.length > 0 ? JSON.stringify(platforms) : null,
         scheduled_date: scheduledDate || null,
-        status: 'pending',
+        status: null,
         feedback: null,
       }).eq('id', postId)
 
-      const removedIds = state.existingAssets.filter(a => !existingAssets.find(e => e.id === a.id)).map(a => a.id)
+      const keptExistingIds = new Set(assets.filter(a => a.kind === 'existing').map(a => a.data.id))
+      const removedIds = state.existingAssets.filter(a => !keptExistingIds.has(a.id)).map(a => a.id)
 
-      // Run deletion + all thumbnail uploads in parallel
+      // Compute position updates for existing assets — only persist where the position actually changed
+      const positionUpdates = assets
+        .map((a, i) => ({ kind: a.kind, id: a.data.id, position: i, original: a.kind === 'existing' ? (a.data as PostAsset).position : -1 }))
+        .filter(u => u.kind === 'existing' && u.original !== u.position)
+
+      // Crop updates — only persist for EXISTING assets (new asset crops go into the insert)
+      const existingIds = new Set(assets.filter(a => a.kind === 'existing').map(a => a.data.id))
+      const cropUpdates = Object.entries(cropEdits)
+        .filter(([assetId]) => existingIds.has(assetId))
+        .map(([assetId, { x, y }]) => ({ assetId, x, y }))
+
+      // Run deletion + thumbnail uploads + position updates + crop updates in parallel
       await Promise.all([
         removedIds.length ? supabase.from('post_assets').delete().in('id', removedIds) : Promise.resolve(),
+        ...positionUpdates.map(u =>
+          supabase.from('post_assets').update({ position: u.position }).eq('id', u.id)
+        ),
+        ...cropUpdates.map(u =>
+          supabase.from('post_assets').update({ crop_x: u.x, crop_y: u.y }).eq('id', u.assetId)
+        ),
         ...Object.entries(thumbEdits).map(async ([assetId, dataUrl]) => {
           const blob = await (await fetch(dataUrl)).blob()
           const thumbPath = `${campaignId}/${postId}/${assetId}_thumb.jpg`
-          await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: true })
+          await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '2592000', upsert: true })
           const thumbUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
           await supabase.from('post_assets').update({ thumbnail_url: thumbUrl }).eq('id', assetId)
         }),
       ])
     }
 
-    // Upload all new assets in parallel
-    const nextPosition = state.isNew ? 0 : existingAssets.length
-    await Promise.all(newAssets.map(async (asset, i) => {
+    // Upload new assets — position comes from their index in the unified `assets` array
+    const newAssetEntries = assets
+      .map((a, i) => ({ item: a, position: i }))
+      .filter(x => x.item.kind === 'new') as { item: { kind: 'new'; data: NewAsset }; position: number }[]
+
+    const errors: string[] = []
+
+    await Promise.all(newAssetEntries.map(async ({ item, position }) => {
+      const asset = item.data
+      const sizeMB = (asset.file.size / 1024 / 1024).toFixed(1)
       const ext = asset.file.name.split('.').pop()
-      const path = `${campaignId}/${postId}/${asset.id}.${ext}`
-      const { error } = await supabase.storage.from('posts').upload(path, asset.file, { contentType: asset.file.type, cacheControl: '3600', upsert: false })
-      if (error) return
+      // Use a timestamp suffix so each upload attempt gets a fresh path — sidesteps any "already exists" collision
+      const path = `${campaignId}/${postId}/${asset.id}_${Date.now()}.${ext}`
+      try {
+        const { error } = await supabase.storage.from('posts').upload(path, asset.file, { contentType: asset.file.type, cacheControl: '2592000', upsert: true })
+        if (error) {
+          console.error('Upload failed for', asset.file.name, error)
+          errors.push(`${asset.file.name} (${sizeMB} MB): ${error.message}`)
+          return
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error('Upload threw for', asset.file.name, e)
+        errors.push(`${asset.file.name} (${sizeMB} MB): ${msg}`)
+        return
+      }
 
       const { data: { publicUrl } } = supabase.storage.from('posts').getPublicUrl(path)
 
@@ -340,15 +505,33 @@ function EditModal({ state, campaignId, onSave, onClose }: {
       if (asset.fileType === 'video' && asset.thumbnailDataUrl) {
         const blob = await (await fetch(asset.thumbnailDataUrl)).blob()
         const thumbPath = `${campaignId}/${postId}/${asset.id}_thumb.jpg`
-        const { error: te } = await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '3600' })
-        if (!te) thumbnailUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
+        const { error: te } = await supabase.storage.from('posts').upload(thumbPath, blob, { contentType: 'image/jpeg', cacheControl: '2592000', upsert: true })
+        if (te) {
+          console.warn('Thumbnail upload failed (continuing with no thumbnail):', te)
+          errors.push(`${asset.file.name} thumbnail: ${te.message}`)
+        } else {
+          thumbnailUrl = supabase.storage.from('posts').getPublicUrl(thumbPath).data.publicUrl
+        }
       }
 
-      await supabase.from('post_assets').insert({
+      const crop = cropEdits[asset.id]
+      const { error: insertError } = await supabase.from('post_assets').insert({
         post_id: postId, file_url: publicUrl, file_type: asset.fileType,
-        thumbnail_url: thumbnailUrl, position: nextPosition + i,
+        thumbnail_url: thumbnailUrl, position,
+        // Only include crop fields if the user explicitly set a position
+        ...(crop ? { crop_x: crop.x, crop_y: crop.y } : {}),
       })
+      if (insertError) {
+        console.error('post_assets insert failed:', insertError)
+        errors.push(`${asset.file.name}: DB insert failed — ${insertError.message}`)
+      }
     }))
+
+    if (errors.length > 0) {
+      setUploadErrors(errors)
+      setSaving(false)
+      return
+    }
 
     // Fetch updated post + assets in parallel
     const [{ data: updatedPost }, { data: updatedAssets }] = await Promise.all([
@@ -367,123 +550,171 @@ function EditModal({ state, campaignId, onSave, onClose }: {
         currentThumb={thumbPickerAsset.current}
         onCapture={dataUrl => {
           const id = thumbPickerAsset.id
-          // Check if it's an existing or new asset
-          if (existingAssets.find(a => a.id === id)) {
+          const item = assets.find(a => a.data.id === id)
+          if (item?.kind === 'existing') {
             setThumbEdits(prev => ({ ...prev, [id]: dataUrl }))
-          } else {
-            setNewAssets(prev => prev.map(a => a.id === id ? { ...a, thumbnailDataUrl: dataUrl } : a))
+          } else if (item?.kind === 'new') {
+            updateNewAssetThumb(id, dataUrl)
           }
         }}
         onClose={() => setThumbPickerAsset(null)}
       />
     )}
+    {cropAsset && firstAssetAspect && (
+      <CropModal
+        src={cropAsset.src}
+        isVideo={cropAsset.isVideo}
+        frameAspect={firstAssetAspect}
+        initialX={cropAsset.x}
+        initialY={cropAsset.y}
+        onSave={(x, y) => setCropEdits(prev => ({ ...prev, [cropAsset.id]: { x, y } }))}
+        onClose={() => setCropAsset(null)}
+      />
+    )}
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)' }}
+      style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-full max-w-lg rounded-3xl overflow-hidden max-h-[90vh] flex flex-col"
-        style={{ backgroundColor: '#0d0d0d', border: '1px solid rgba(255,255,255,0.1)' }}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="font-semibold text-white">{state.isNew ? 'Add post' : 'Edit post'}</h2>
-          <button onClick={onClose} className="text-white/40 hover:text-white transition-colors text-xl leading-none">✕</button>
+        style={{ backgroundColor: '#fff', border: '1px solid rgba(0,0,0,0.1)' }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-black/10">
+          <h2 className="font-semibold text-black">{state.isNew ? 'Add post' : 'Edit post'}</h2>
+          <button onClick={onClose} className="text-black/40 hover:text-black transition-colors text-xl leading-none">✕</button>
         </div>
         <div className="overflow-y-auto p-6 space-y-5">
           <div>
-            <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Assets</p>
+            <p className="text-xs text-black/40 uppercase tracking-widest mb-2">
+              Assets {assets.length > 1 && <span className="normal-case tracking-normal">· drag to reorder</span>}
+            </p>
             <div className="flex gap-3 flex-wrap">
-              {existingAssets.map((a, i) => (
-                <div key={a.id} className="shrink-0">
-                  <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5">
-                    {a.file_type === 'video'
-                      ? (thumbEdits[a.id] || a.thumbnail_url)
-                        // eslint-disable-next-line @next/next/no-img-element
-                        ? <img src={thumbEdits[a.id] || a.thumbnail_url!} alt="" className="w-full h-full object-cover" />
-                        : <video src={a.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+              {assets.map((item, i) => {
+                const isDragging = assetDragIdx === i
+                const isOver = assetOverIdx === i && assetDragIdx !== null && assetDragIdx !== i
+                const isExisting = item.kind === 'existing'
+                const id = item.data.id
+                const fileType = isExisting ? (item.data as PostAsset).file_type : (item.data as NewAsset).fileType
+                const previewUrl = isExisting
+                  ? (fileType === 'video' ? (thumbEdits[id] || (item.data as PostAsset).thumbnail_url) : (item.data as PostAsset).file_url)
+                  : (fileType === 'video' ? (item.data as NewAsset).thumbnailDataUrl : (item.data as NewAsset).preview)
+                const videoSrc = isExisting ? (item.data as PostAsset).file_url : (item.data as NewAsset).preview
+                const hasThumb = isExisting ? !!thumbEdits[id] : !!(item.data as NewAsset).thumbnailDataUrl
+                return (
+                <div key={id} className="shrink-0 transition-all"
+                  draggable={assets.length > 1}
+                  onDragStart={() => { setAssetDragIdx(i); setAssetOverIdx(null) }}
+                  onDragOver={e => { e.preventDefault(); setAssetOverIdx(i) }}
+                  onDragLeave={() => setAssetOverIdx(null)}
+                  onDrop={() => { if (assetDragIdx !== null) reorderAssets(assetDragIdx, i); setAssetDragIdx(null); setAssetOverIdx(null) }}
+                  onDragEnd={() => { setAssetDragIdx(null); setAssetOverIdx(null) }}
+                  style={{ opacity: isDragging ? 0.4 : 1, cursor: assets.length > 1 ? 'grab' : 'default' }}>
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-black/5"
+                    style={isOver ? { outline: `2px solid ${PINK}`, outlineOffset: '2px' } : undefined}>
+                    {(() => {
+                      const cropEdit = cropEdits[id]
+                      const cropX = cropEdit?.x ?? (isExisting ? ((item.data as PostAsset).crop_x ?? 50) : 50)
+                      const cropY = cropEdit?.y ?? (isExisting ? ((item.data as PostAsset).crop_y ?? 50) : 50)
+                      const objectPosition = `${cropX}% ${cropY}%`
+                      if (fileType === 'video' && !previewUrl) {
+                        return <video src={videoSrc} className="w-full h-full object-cover pointer-events-none" style={{ objectPosition }} muted preload="metadata" />
+                      }
                       // eslint-disable-next-line @next/next/no-img-element
-                      : <img src={a.file_url} alt="" className="w-full h-full object-cover" />
-                    }
-                    {i === 0 && totalAssets > 1 && (
-                      <span className="absolute bottom-0 left-0 right-0 text-center text-white text-[9px] bg-black/60 py-0.5">cover</span>
+                      return <img src={previewUrl as string} alt="" className="w-full h-full object-cover pointer-events-none" style={{ objectPosition }} />
+                    })()}
+                    {!isExisting && (
+                      <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full pointer-events-none" style={{ backgroundColor: PINK }} />
                     )}
-                    <button onClick={() => setExistingAssets(prev => prev.filter(x => x.id !== a.id))}
+                    {i === 0 && assets.length > 1 && (
+                      <span className="absolute bottom-0 left-0 right-0 text-center text-white text-[9px] bg-black/60 py-0.5 pointer-events-none">cover</span>
+                    )}
+                    <button onClick={() => removeAsset(id)}
                       className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
                   </div>
-                  {a.file_type === 'video' && (
-                    <button onClick={() => setThumbPickerAsset({ id: a.id, src: a.file_url, current: thumbEdits[a.id] || a.thumbnail_url })}
-                      className="mt-1 w-16 text-[10px] py-0.5 rounded text-center transition-colors"
-                      style={thumbEdits[a.id] ? { color: PINK } : { color: 'rgba(255,255,255,0.35)' }}>
-                      {thumbEdits[a.id] ? '✓ thumb' : '+ thumb'}
-                    </button>
-                  )}
-                </div>
-              ))}
-              {newAssets.map(a => (
-                <div key={a.id} className="shrink-0">
-                  <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5">
-                    {a.fileType === 'video'
-                      ? a.thumbnailDataUrl
-                        // eslint-disable-next-line @next/next/no-img-element
-                        ? <img src={a.thumbnailDataUrl} alt="" className="w-full h-full object-cover" />
-                        : <video src={a.preview} className="w-full h-full object-cover" muted preload="metadata" />
-                      // eslint-disable-next-line @next/next/no-img-element
-                      : <img src={a.preview} alt="" className="w-full h-full object-cover" />
-                    }
-                    <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full" style={{ backgroundColor: PINK }} />
-                    <button onClick={() => setNewAssets(prev => prev.filter(x => x.id !== a.id))}
-                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center text-white/80 hover:text-white text-[10px]">✕</button>
+                  <div className="mt-1 flex flex-col gap-0.5 w-16">
+                    {fileType === 'video' && (
+                      <button onClick={() => setThumbPickerAsset({
+                        id,
+                        src: videoSrc,
+                        current: isExisting ? (thumbEdits[id] || (item.data as PostAsset).thumbnail_url) : (item.data as NewAsset).thumbnailDataUrl,
+                      })}
+                        className="text-[10px] py-0.5 rounded text-center transition-colors"
+                        style={hasThumb ? { color: PINK } : { color: 'rgba(0,0,0,0.35)' }}>
+                        {hasThumb ? '✓ thumb' : '+ thumb'}
+                      </button>
+                    )}
+                    {i > 0 && assets.length > 1 && (
+                      <button onClick={() => {
+                        const cropEdit = cropEdits[id]
+                        const currentX = cropEdit?.x ?? (isExisting ? ((item.data as PostAsset).crop_x ?? 50) : 50)
+                        const currentY = cropEdit?.y ?? (isExisting ? ((item.data as PostAsset).crop_y ?? 50) : 50)
+                        // For video without thumbnail, fall back to video src (CropModal will use <video>)
+                        const cropSrc = fileType === 'video'
+                          ? (previewUrl as string) || videoSrc
+                          : (previewUrl as string)
+                        setCropAsset({ id, src: cropSrc, isVideo: fileType === 'video' && !previewUrl, x: currentX, y: currentY })
+                      }}
+                        className="text-[10px] py-0.5 rounded text-center transition-colors"
+                        style={cropEdits[id] ? { color: PINK } : { color: 'rgba(0,0,0,0.35)' }}>
+                        {cropEdits[id] ? '✓ position' : '📐 position'}
+                      </button>
+                    )}
                   </div>
-                  {a.fileType === 'video' && (
-                    <button onClick={() => setThumbPickerAsset({ id: a.id, src: a.preview, current: a.thumbnailDataUrl })}
-                      className="mt-1 w-16 text-[10px] py-0.5 rounded text-center transition-colors"
-                      style={a.thumbnailDataUrl ? { color: PINK } : { color: 'rgba(255,255,255,0.35)' }}>
-                      {a.thumbnailDataUrl ? '✓ thumb' : '+ thumb'}
-                    </button>
-                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
             <button onClick={() => fileRef.current?.click()}
               className="mt-3 text-xs px-3 py-1.5 rounded-full border transition-colors"
-              style={{ borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.4)' }}>
+              style={{ borderColor: 'rgba(0,0,0,0.15)', color: 'rgba(0,0,0,0.4)' }}>
               + Add asset
             </button>
             <input ref={fileRef} type="file" multiple accept="image/*,video/*" className="hidden"
               onChange={e => addFiles(e.target.files)} />
-            {newAssets.length > 0 && <p className="text-xs mt-2" style={{ color: PINK }}>· {newAssets.length} new file{newAssets.length !== 1 ? 's' : ''} to upload</p>}
+            {newAssetsCount > 0 && <p className="text-xs mt-2" style={{ color: PINK }}>· {newAssetsCount} new file{newAssetsCount !== 1 ? 's' : ''} to upload</p>}
           </div>
           <div>
-            <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Scheduled date</p>
+            <p className="text-xs text-black/40 uppercase tracking-widest mb-2">Scheduled date</p>
             <input type="date" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#f6a7d7] transition-colors"
-              style={{ colorScheme: 'dark' }} />
+              className="w-full bg-black/5 border border-black/10 rounded-xl px-4 py-2.5 text-sm text-black focus:outline-none focus:border-[#f6a7d7] transition-colors"
+              style={{ colorScheme: 'light' }} />
           </div>
           <div>
-            <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Platforms</p>
+            <p className="text-xs text-black/40 uppercase tracking-widest mb-2">Platforms</p>
             <div className="flex flex-wrap gap-1.5">
               {PLATFORMS.map(p => (
                 <button key={p} type="button" onClick={() => togglePlatform(p)}
                   className="text-xs px-3 py-1 rounded-full border transition-all"
                   style={platforms.includes(p)
                     ? { backgroundColor: PINK, borderColor: PINK, color: '#000' }
-                    : { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.4)' }
+                    : { backgroundColor: 'transparent', borderColor: 'rgba(0,0,0,0.15)', color: 'rgba(0,0,0,0.4)' }
                   }>{p}</button>
               ))}
             </div>
           </div>
           <div>
-            <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Caption</p>
+            <p className="text-xs text-black/40 uppercase tracking-widest mb-2">Caption</p>
             <textarea value={caption} onChange={e => setCaption(e.target.value)}
               placeholder="Caption (optional)" rows={4}
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#f6a7d7] transition-colors resize-none" />
+              className="w-full bg-black/5 border border-black/10 rounded-xl px-4 py-2.5 text-sm text-black placeholder-black/20 focus:outline-none focus:border-[#f6a7d7] transition-colors resize-none" />
           </div>
         </div>
-        <div className="px-6 py-4 border-t border-white/10 flex gap-3">
+        {uploadErrors.length > 0 && (
+          <div className="mx-6 mb-3 rounded-xl p-3 text-xs" style={{ backgroundColor: '#ff6b6b10', border: '1px solid #ff6b6b40' }}>
+            <p className="font-semibold mb-1" style={{ color: '#ff6b6b' }}>Upload failed — post not saved</p>
+            {uploadErrors.map((e, i) => (
+              <p key={i} className="mt-1" style={{ color: '#ff6b6b' }}>• {e}</p>
+            ))}
+            <p className="mt-2 text-[11px]" style={{ color: 'rgba(0,0,0,0.5)' }}>
+              Common causes: Supabase Storage bucket size limit (Settings → Storage → posts bucket → edit max file size), missing upload permissions, or a flaky network. Fix and click Save again.
+            </p>
+          </div>
+        )}
+        <div className="px-6 py-4 border-t border-black/10 flex gap-3">
           <button onClick={onClose} disabled={saving}
             className="flex-1 py-2.5 rounded-full text-sm font-medium disabled:opacity-40"
-            style={{ border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}>Cancel</button>
-          <button onClick={handleSave} disabled={saving || totalAssets === 0}
+            style={{ border: '1px solid rgba(0,0,0,0.15)', color: 'rgba(0,0,0,0.5)' }}>Cancel</button>
+          <button onClick={() => { setUploadErrors([]); handleSave() }} disabled={saving || totalAssets === 0}
             className="flex-1 py-2.5 rounded-full text-sm font-semibold text-black transition-opacity hover:opacity-80 disabled:opacity-40"
             style={{ backgroundColor: PINK }}>
-            {saving ? 'Saving...' : state.isNew ? 'Add post' : 'Save & reset for review'}
+            {saving ? 'Saving...' : uploadErrors.length > 0 ? 'Retry save' : state.isNew ? 'Add post' : 'Save & reset for review'}
           </button>
         </div>
       </div>
@@ -510,7 +741,7 @@ function AdminGrid({ posts, theme, onUpdate }: { posts: PostWithAssets[]; theme:
       if (!a.scheduled_date && !b.scheduled_date) return 0
       if (!a.scheduled_date) return 1
       if (!b.scheduled_date) return -1
-      return new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime()
+      return new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime()
     })
 
   async function handleDrop(fromIdx: number, toIdx: number) {
@@ -586,7 +817,9 @@ function AdminGrid({ posts, theme, onUpdate }: { posts: PostWithAssets[]; theme:
                   {cover ? (
                     cover.file_type === 'video'
                       // eslint-disable-next-line @next/next/no-img-element
-                      ? cover.thumbnail_url ? <img src={cover.thumbnail_url} alt="" className="w-full h-full object-cover" /> : <video src={cover.file_url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                      ? cover.thumbnail_url
+                        ? <img src={cover.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center" style={{ color: theme.faint }}>🎥</div>
                       // eslint-disable-next-line @next/next/no-img-element
                       : <img src={cover.file_url} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -628,23 +861,39 @@ export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [posts, setPosts] = useState<PostWithAssets[]>([])
+  const [reviewers, setReviewers] = useState<Reviewer[]>([])
+  const [postReviews, setPostReviews] = useState<PostReview[]>([])
+  const [newReviewerName, setNewReviewerName] = useState('')
+  const [addingReviewer, setAddingReviewer] = useState(false)
+  const [copiedReviewer, setCopiedReviewer] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
+  const [copiedSchedule, setCopiedSchedule] = useState(false)
+  const [copiedPending, setCopiedPending] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [editingPost, setEditingPost] = useState<EditState | null>(null)
   const [pageTab, setPageTab] = useState<PageTab>('posts')
-  const [dark, setDark] = useState(() => {
-    if (typeof window === 'undefined') return true
-    return localStorage.getItem('adminDark') !== 'false'
-  })
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  const t = makeTheme(dark)
-
-  function toggleDark() {
-    const next = !dark
-    setDark(next)
-    localStorage.setItem('adminDark', String(next))
+  function toggleSelect(id: string) {
+    setSelectedIds(s => {
+      const next = new Set(s)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
   }
+
+  async function deleteSelected() {
+    if (!selectedIds.size) return
+    if (!confirm(`Move ${selectedIds.size} post${selectedIds.size === 1 ? '' : 's'} to trash? Captions and files are preserved.`)) return
+    const ids = [...selectedIds]
+    setPosts(p => p.filter(x => !selectedIds.has(x.id)))
+    setSelectedIds(new Set())
+    setSelectMode(false)
+    await supabase.from('posts').update({ deleted_at: new Date().toISOString() }).in('id', ids)
+  }
+  const t = THEME
 
   useEffect(() => {
     if (!id) return
@@ -656,11 +905,91 @@ export default function CampaignDetailPage() {
       })
   }, [id])
 
+  // Reviewer loading is completely separate — any failure here is silently ignored
+  useEffect(() => {
+    if (!id) return
+    ;(async () => {
+      try {
+        const { data: revs } = await supabase.from('reviewers').select('*').eq('campaign_id', id).order('created_at')
+        if (revs) setReviewers(revs)
+      } catch { /* table may not exist yet */ }
+    })()
+  }, [id])
+
+  useEffect(() => {
+    if (!posts.length) return
+    ;(async () => {
+      try {
+        const { data: reviews } = await supabase.from('post_reviews').select('*').in('post_id', posts.map(p => p.id))
+        if (reviews) setPostReviews(reviews)
+      } catch { /* table may not exist yet */ }
+    })()
+  }, [posts.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function addReviewer() {
+    if (!newReviewerName.trim() || !campaign) return
+    const email = newReviewerName.trim().toLowerCase()
+    // Basic email check — approvers sign in by email, so this needs to be a valid address
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      alert('Please enter a valid email address.')
+      return
+    }
+    setAddingReviewer(true)
+    const token = generateToken()
+    const { data, error } = await supabase.from('reviewers').insert({
+      campaign_id: campaign.id,
+      name: email.split('@')[0],
+      email,
+      token,
+    }).select().single()
+    setAddingReviewer(false)
+    if (error) {
+      alert(`Could not add approver — ${error.message}.\n\nIf this says "email column not found", run the latest migration in supabase-schema.sql.`)
+      return
+    }
+    if (data) setReviewers(r => [...r, data])
+    setNewReviewerName('')
+  }
+
+  async function removeReviewer(reviewerId: string) {
+    await supabase.from('reviewers').delete().eq('id', reviewerId)
+    setReviewers(r => r.filter(x => x.id !== reviewerId))
+    setPostReviews(pr => pr.filter(x => x.reviewer_id !== reviewerId))
+  }
+
+  function copyReviewerLink(token: string, reviewerId: string) {
+    navigator.clipboard.writeText(`${window.location.origin}/review/${token}`)
+    setCopiedReviewer(reviewerId)
+    setTimeout(() => setCopiedReviewer(null), 2000)
+  }
+
+  function getReviewerChips(postId: string): { name: string; status: PostStatus | null }[] {
+    return reviewers.map(rev => {
+      const review = postReviews.find(r => r.post_id === postId && r.reviewer_id === rev.id)
+      return { name: rev.name, status: review?.status ?? null }
+    })
+  }
+
   function copyLink() {
-    if (!campaign) return
-    navigator.clipboard.writeText(`${window.location.origin}/review/${campaign.token}`)
+    // The "review link" is now the universal sign-in page. Each approver signs in by email
+    // and sees the campaigns they've been added to.
+    navigator.clipboard.writeText(`${window.location.origin}/review`)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  function copyScheduleLink() {
+    if (!campaign) return
+    navigator.clipboard.writeText(`${window.location.origin}/schedule/${campaign.token}`)
+    setCopiedSchedule(true)
+    setTimeout(() => setCopiedSchedule(false), 2000)
+  }
+
+  function copyPendingLink() {
+    if (!campaign) return
+    navigator.clipboard.writeText(`${window.location.origin}/review/${campaign.token}?pending=1`)
+    setCopiedPending(true)
+    setTimeout(() => setCopiedPending(false), 2000)
   }
 
   async function publishCampaign() {
@@ -672,15 +1001,81 @@ export default function CampaignDetailPage() {
   }
 
   async function resetPostToPending(postId: string) {
-    await supabase.from('posts').update({ status: 'pending', feedback: null }).eq('id', postId)
-    setPosts(p => p.map(x => x.id === postId ? { ...x, status: 'pending', feedback: null } : x))
+    await supabase.from('posts').update({ status: null, feedback: null }).eq('id', postId)
+    setPosts(p => p.map(x => x.id === postId ? { ...x, status: null, feedback: null } : x))
+  }
+
+  async function toggleInternalApproval(postId: string) {
+    const post = posts.find(p => p.id === postId)
+    if (!post) return
+    const next = post.internal_approved_at ? null : new Date().toISOString()
+    let nextBy: string | null = null
+    if (next) {
+      const { data } = await supabase.auth.getUser()
+      nextBy = data.user?.email || null
+    }
+    setPosts(p => p.map(x => x.id === postId ? { ...x, internal_approved_at: next, internal_approved_by: nextBy } : x))
+    const { error } = await supabase.from('posts').update({ internal_approved_at: next, internal_approved_by: nextBy }).eq('id', postId)
+    if (error) {
+      setPosts(p => p.map(x => x.id === postId ? { ...x, internal_approved_at: post.internal_approved_at, internal_approved_by: post.internal_approved_by } : x))
+      alert(`Could not toggle internal approval — ${error.message}.\n\nIf this says "internal_approved_at column not found", run the migration.`)
+    }
+  }
+
+  async function toggleScheduled(postId: string) {
+    const post = posts.find(p => p.id === postId)
+    if (!post) return
+    const prev = post.scheduled_at
+    const next = prev ? null : new Date().toISOString()
+    setPosts(p => p.map(x => x.id === postId ? { ...x, scheduled_at: next } : x))
+    const { error } = await supabase.from('posts').update({ scheduled_at: next }).eq('id', postId)
+    if (error) {
+      // Roll back the optimistic UI change and surface the issue
+      setPosts(p => p.map(x => x.id === postId ? { ...x, scheduled_at: prev } : x))
+      alert(`Could not save scheduled state — ${error.message}.\n\nIf this says "scheduled_at column not found", run the migration in supabase-schema.sql.`)
+    }
+  }
+
+  // Trigger a browser download for every asset on this post.
+  // Fetches each file as a blob and saves via an anchor — reliable across all browsers, no popup blockers.
+  async function downloadPostFiles(post: PostWithAssets) {
+    const safeTitle = ((post.caption || 'post').slice(0, 40).replace(/[^a-z0-9-_]+/gi, '_') || 'post')
+    for (let i = 0; i < post.assets.length; i++) {
+      const a = post.assets[i]
+      const ext = (a.file_url.split('?')[0].split('.').pop() || (a.file_type === 'video' ? 'mp4' : 'jpg')).toLowerCase()
+      const filename = post.assets.length > 1 ? `${safeTitle}_${i + 1}.${ext}` : `${safeTitle}.${ext}`
+      try {
+        const res = await fetch(a.file_url)
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = filename
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        // Release memory after a moment
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      } catch (e) {
+        console.error('Download failed for', filename, e)
+      }
+    }
+  }
+
+  async function deletePost(postId: string) {
+    if (!campaign) return
+    if (!confirm('Move this post to trash? Captions and files are preserved — restore from the campaign trash.')) return
+
+    // Soft delete — keep the row and its files so nothing is irrecoverably lost
+    setPosts(p => p.filter(x => x.id !== postId))
+    await supabase.from('posts').update({ deleted_at: new Date().toISOString() }).eq('id', postId)
   }
 
   async function resetAllChanges() {
     const ids = posts.filter(p => p.status === 'changes_requested' || p.status === 'rejected').map(p => p.id)
     if (!ids.length) return
-    await supabase.from('posts').update({ status: 'pending', feedback: null }).in('id', ids)
-    setPosts(p => p.map(x => ids.includes(x.id) ? { ...x, status: 'pending', feedback: null } : x))
+    await supabase.from('posts').update({ status: null, feedback: null }).in('id', ids)
+    setPosts(p => p.map(x => ids.includes(x.id) ? { ...x, status: null, feedback: null } : x))
   }
 
   function openEdit(post: PostWithAssets) {
@@ -712,7 +1107,6 @@ export default function CampaignDetailPage() {
   const approved = posts.filter(p => p.status === 'approved').length
   const changes = posts.filter(p => p.status === 'changes_requested').length
   const rejected = posts.filter(p => p.status === 'rejected').length
-  const pending = posts.filter(p => p.status === 'pending').length
 
   if (loading) return (
     <div className="min-h-screen p-10 text-sm transition-colors" style={{ backgroundColor: t.bg, color: t.faint }}>
@@ -726,7 +1120,7 @@ export default function CampaignDetailPage() {
   )
 
   return (
-    <div className="min-h-screen transition-colors duration-200 p-6 md:p-10" style={{ backgroundColor: t.bg }}>
+    <div className="min-h-screen transition-colors duration-200 p-6 md:p-10" style={{ backgroundColor: t.bg, color: t.text }}>
       {editingPost && campaign && (
         <EditModal state={editingPost} campaignId={campaign.id}
           onSave={updated => {
@@ -748,7 +1142,6 @@ export default function CampaignDetailPage() {
             onMouseOut={e => (e.currentTarget.style.color = t.faint)}>
             ← Back
           </Link>
-          <ThemeToggle dark={dark} onToggle={toggleDark} border={t.border} subtext={t.subtext} />
         </div>
 
         {/* Header */}
@@ -787,7 +1180,12 @@ export default function CampaignDetailPage() {
                 <button onClick={copyLink}
                   className="px-5 py-2.5 rounded-full text-sm font-semibold text-black transition-all"
                   style={{ backgroundColor: copied ? '#ffffff' : PINK }}>
-                  {copied ? '✓ Copied!' : 'Copy client link'}
+                  {copied ? '✓ Copied!' : 'Copy sign-in link'}
+                </button>
+                <button onClick={copyScheduleLink}
+                  className="px-4 py-2.5 rounded-full text-sm font-medium transition-colors"
+                  style={{ border: `1px solid ${t.border}`, color: copiedSchedule ? PINK : t.subtext }}>
+                  {copiedSchedule ? '✓ Copied!' : '📅 Copy schedule link'}
                 </button>
               </>
             )}
@@ -795,9 +1193,8 @@ export default function CampaignDetailPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-3 gap-3 mb-4">
           {[
-            { label: 'Pending', count: pending, color: t.faint },
             { label: 'Approved', count: approved, color: PINK },
             { label: 'Changes', count: changes, color: '#ff6b6b' },
             { label: 'Rejected', count: rejected, color: '#ff6b6b' },
@@ -821,6 +1218,50 @@ export default function CampaignDetailPage() {
           </div>
         )}
 
+        {/* Approvers panel — each row is a client who signs in with their email at /review */}
+        <div className="rounded-2xl p-5 mb-6" style={{ border: `1px solid ${t.border}` }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: t.faint }}>Approvers</p>
+          <p className="text-xs mb-4" style={{ color: t.faint }}>
+            Each person signs in at <code>/review</code> with their email. A post is only fully approved once <strong>every</strong> approver below approves it.
+          </p>
+          {reviewers.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {reviewers.map(rev => {
+                const done = postReviews.filter(r => r.reviewer_id === rev.id && r.status === 'approved').length
+                return (
+                  <div key={rev.id} className="flex items-center gap-3 rounded-xl px-4 py-3"
+                    style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}` }}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: t.text }}>{rev.name || rev.email}</p>
+                      <p className="text-xs mt-0.5 truncate" style={{ color: t.faint }}>
+                        {rev.email ? `${rev.email} · ` : ''}{done}/{posts.length} approved
+                      </p>
+                    </div>
+                    <button onClick={() => removeReviewer(rev.id)}
+                      className="shrink-0 text-xs w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                      style={{ border: `1px solid ${t.border}`, color: t.faint }}
+                      onMouseOver={e => (e.currentTarget.style.color = '#ff6b6b')}
+                      onMouseOut={e => (e.currentTarget.style.color = t.faint)}>✕</button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input type="email" value={newReviewerName}
+              onChange={e => setNewReviewerName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') addReviewer() }}
+              placeholder="client@email.com"
+              className="flex-1 rounded-xl px-4 py-2.5 text-sm focus:outline-none transition-colors"
+              style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.text }} />
+            <button onClick={addReviewer} disabled={!newReviewerName.trim() || addingReviewer}
+              className="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold text-black transition-all disabled:opacity-40"
+              style={{ backgroundColor: PINK }}>
+              {addingReviewer ? '...' : '+ Add'}
+            </button>
+          </div>
+        </div>
+
         {/* Tabs */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex gap-1">
@@ -832,29 +1273,66 @@ export default function CampaignDetailPage() {
               </button>
             ))}
           </div>
-          {campaign.status === 'draft' && (
-            <button onClick={openAddPost}
+          <div className="flex items-center gap-2">
+            {selectMode ? (
+              <>
+                <button onClick={deleteSelected} disabled={!selectedIds.size}
+                  className="text-xs px-4 py-1.5 rounded-full font-medium transition-colors disabled:opacity-40"
+                  style={{ backgroundColor: '#ff6b6b15', border: '1px solid #ff6b6b40', color: '#ff6b6b' }}>
+                  Delete {selectedIds.size ? selectedIds.size : ''}
+                </button>
+                <button onClick={() => { setSelectMode(false); setSelectedIds(new Set()) }}
+                  className="text-xs px-4 py-1.5 rounded-full font-medium"
+                  style={{ border: `1px solid ${t.border}`, color: t.subtext }}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setSelectMode(true)}
+                className="text-xs px-4 py-1.5 rounded-full font-medium transition-colors"
+                style={{ border: `1px solid ${t.border}`, color: t.subtext }}>
+                Select
+              </button>
+            )}
+            <Link href={`/admin/new?addTo=${campaign.id}`}
               className="text-xs px-4 py-1.5 rounded-full font-medium transition-colors"
               style={{ backgroundColor: t.inputBg, border: `1px solid ${t.border}`, color: t.subtext }}
               onMouseOver={e => (e.currentTarget.style.color = t.text)}
               onMouseOut={e => (e.currentTarget.style.color = t.subtext)}>
-              + Add post
-            </button>
-          )}
+              + Add posts
+            </Link>
+          </div>
         </div>
 
         {/* Posts list */}
         {pageTab === 'posts' && (
           <div className="space-y-4">
-            {posts.map(post => {
+            {[...posts].sort((a, b) => {
+              if (!a.scheduled_date && !b.scheduled_date) return 0
+              if (!a.scheduled_date) return 1
+              if (!b.scheduled_date) return -1
+              return new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime()
+            }).map(post => {
               const cover = post.assets[0]
               const isCarousel = post.assets.length > 1
               return (
-                <div key={post.id} className="rounded-2xl p-4 flex gap-4"
+                <div key={post.id} id={`post-${post.id}`}
+                  onClick={selectMode ? () => toggleSelect(post.id) : undefined}
+                  className={`rounded-2xl p-4 flex gap-4 scroll-mt-20 ${selectMode ? 'cursor-pointer' : ''}`}
                   style={{
-                    border: `1px solid ${(post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b30' : t.border}`,
-                    backgroundColor: t.card,
+                    border: `1px solid ${selectedIds.has(post.id) ? PINK : (post.status === 'changes_requested' || post.status === 'rejected') ? '#ff6b6b30' : t.border}`,
+                    backgroundColor: selectedIds.has(post.id) ? `${PINK}10` : t.card,
                   }}>
+                  {selectMode && (
+                    <div className="shrink-0 flex items-start pt-1">
+                      <div className="w-5 h-5 rounded-md flex items-center justify-center text-xs font-bold"
+                        style={selectedIds.has(post.id)
+                          ? { backgroundColor: PINK, color: '#fff' }
+                          : { border: `1.5px solid ${t.border}`, color: 'transparent' }}>
+                        ✓
+                      </div>
+                    </div>
+                  )}
                   <div className="w-24 h-24 rounded-xl overflow-hidden shrink-0 relative"
                     style={{ backgroundColor: t.inputBg }}>
                     {cover ? (
@@ -862,7 +1340,7 @@ export default function CampaignDetailPage() {
                         ? cover.thumbnail_url
                           // eslint-disable-next-line @next/next/no-img-element
                           ? <img src={cover.thumbnail_url} alt="" className="w-full h-full object-cover" />
-                          : <video src={cover.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                          : <div className="w-full h-full flex items-center justify-center" style={{ color: t.faint, fontSize: '20px' }}>🎥</div>
                         // eslint-disable-next-line @next/next/no-img-element
                         : <img src={cover.file_url} alt="" className="w-full h-full object-cover" />
                     ) : (
@@ -901,19 +1379,48 @@ export default function CampaignDetailPage() {
                       </p>
                     )}
                     {post.caption && <p className="text-sm leading-relaxed line-clamp-2" style={{ color: t.subtext }}>{post.caption}</p>}
-                    {(post.status === 'changes_requested' || post.status === 'rejected') && (
+                    {reviewers.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {getReviewerChips(post.id).map(chip => (
+                          <span key={chip.name} className="text-xs px-2 py-0.5 rounded-full font-medium"
+                            style={chip.status === 'approved' ? { backgroundColor: `${PINK}20`, color: PINK }
+                              : chip.status === 'changes_requested' || chip.status === 'rejected' ? { backgroundColor: '#ff6b6b15', color: '#ff9999' }
+                              : { border: `1px solid ${t.border}`, color: t.faint }}>
+                            {chip.status === 'approved' ? '✓' : chip.status === 'changes_requested' ? '⚡' : chip.status === 'rejected' ? '✕' : '·'} {chip.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {reviewers.length === 0 && (post.status === 'changes_requested' || post.status === 'rejected') && (
                       <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: '#ff6b6b12', border: '1px solid #ff6b6b25' }}>
                         <span style={{ color: '#ff6b6b80' }}>Client note: </span>
                         <span style={{ color: '#ff9999' }}>{post.feedback || <em style={{ opacity: 0.5 }}>No note left</em>}</span>
                       </div>
                     )}
-                    <div className="flex gap-2 mt-2 flex-wrap">
+                    <div className="flex gap-2 mt-2 flex-wrap items-center">
                       <button onClick={() => openEdit(post)}
                         className="text-xs px-3 py-1 rounded-full border transition-colors"
                         style={{ borderColor: t.border, color: t.faint }}
                         onMouseOver={e => (e.currentTarget.style.color = t.text)}
                         onMouseOut={e => (e.currentTarget.style.color = t.faint)}>
                         ✎ Edit
+                      </button>
+                      {post.assets.length > 0 && (
+                        <button onClick={() => downloadPostFiles(post)}
+                          className="text-xs px-3 py-1 rounded-full border transition-colors"
+                          style={{ borderColor: t.border, color: t.faint }}
+                          onMouseOver={e => (e.currentTarget.style.color = t.text)}
+                          onMouseOut={e => (e.currentTarget.style.color = t.faint)}>
+                          ⬇ Files ({post.assets.length})
+                        </button>
+                      )}
+                      <button onClick={() => toggleScheduled(post.id)}
+                        className="text-xs px-3 py-1 rounded-full border transition-all"
+                        style={post.scheduled_at
+                          ? { backgroundColor: `${PINK}20`, borderColor: `${PINK}60`, color: PINK }
+                          : { borderColor: t.border, color: t.faint }
+                        }>
+                        {post.scheduled_at ? '✓ Posted' : '📅 Mark as posted'}
                       </button>
                       {(post.status === 'changes_requested' || post.status === 'rejected') && (
                         <button onClick={() => resetPostToPending(post.id)}
@@ -924,6 +1431,13 @@ export default function CampaignDetailPage() {
                           ↺ Reset only
                         </button>
                       )}
+                      <button onClick={() => deletePost(post.id)}
+                        className="text-xs px-3 py-1 rounded-full border transition-colors ml-auto"
+                        style={{ borderColor: '#ff6b6b30', color: '#ff6b6b80' }}
+                        onMouseOver={e => (e.currentTarget.style.color = '#ff6b6b')}
+                        onMouseOut={e => (e.currentTarget.style.color = '#ff6b6b80')}>
+                        🗑 Delete
+                      </button>
                     </div>
                   </div>
                 </div>

@@ -63,13 +63,9 @@ const MOCK_POSTS: MockPost[] = [
   },
 ]
 
-type Theme = { bg: string; border: string; text: string; subtext: string; faint: string; inputBg: string; mediaBg: string; logo: string; dark: boolean }
+type Theme = { bg: string; border: string; text: string; subtext: string; faint: string; inputBg: string; mediaBg: string; logo: string }
 
-function makeTheme(dark: boolean): Theme {
-  return dark
-    ? { bg: '#000', border: 'rgba(255,255,255,0.08)', text: '#fff', subtext: 'rgba(255,255,255,0.5)', faint: 'rgba(255,255,255,0.2)', inputBg: 'rgba(255,255,255,0.05)', mediaBg: '#0a0a0a', logo: '/WHITE_PINK.png', dark: true }
-    : { bg: '#fff', border: 'rgba(0,0,0,0.08)', text: '#000', subtext: 'rgba(0,0,0,0.5)', faint: 'rgba(0,0,0,0.25)', inputBg: 'rgba(0,0,0,0.03)', mediaBg: '#f0f0f0', logo: '/BLACK_PINK.png', dark: false }
-}
+const THEME: Theme = { bg: '#fff', border: 'rgba(0,0,0,0.1)', text: '#000', subtext: '#000', faint: '#000', inputBg: 'rgba(0,0,0,0.03)', mediaBg: '#fff', logo: '/BLACK_PINK.png' }
 
 function formatDate(d: string | null) {
   if (!d) return null
@@ -142,17 +138,16 @@ export default function DemoPage() {
   const [statuses, setStatuses] = useState<Record<string, PostStatus>>({ '1': 'pending', '2': 'pending', '3': 'pending', '4': 'pending' })
   const [feedback, setFeedback] = useState<Record<string, string>>({ '1': '', '2': '', '3': '', '4': '' })
   const [tab, setTab] = useState<Tab>('review')
-  const [dark, setDark] = useState(false)
 
-  const theme = makeTheme(dark)
+  const theme = THEME
   const posts = MOCK_POSTS.map(p => ({ ...p, status: statuses[p.id] }))
   const allDone = posts.every(p => p.status !== 'pending')
   const allApproved = posts.every(p => p.status === 'approved')
 
   return (
-    <div className="min-h-screen transition-colors duration-300" style={{ backgroundColor: theme.bg }}>
+    <div className="min-h-screen transition-colors duration-300" style={{ backgroundColor: theme.bg, color: theme.text }}>
       {/* Top bar */}
-      <div className="sticky top-0 z-20 px-4 py-3 backdrop-blur-xl" style={{ backgroundColor: dark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)', borderBottom: `1px solid ${theme.border}` }}>
+      <div className="sticky top-0 z-20 px-4 py-3 backdrop-blur-xl" style={{ backgroundColor: 'rgba(255,255,255,0.85)', borderBottom: `1px solid ${theme.border}` }}>
         <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium truncate" style={{ color: theme.text }}>May Content — Acme Co</p>
@@ -160,12 +155,6 @@ export default function DemoPage() {
           </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={theme.logo} alt="The Break Digital" className="h-7 w-auto shrink-0 object-contain" />
-          <button onClick={() => setDark(d => !d)} className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors" style={{ backgroundColor: theme.inputBg, border: `1px solid ${theme.border}` }}>
-            {dark
-              ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: theme.subtext }}><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-              : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4" style={{ color: theme.subtext }}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            }
-          </button>
         </div>
         <div className="max-w-xl mx-auto flex gap-1 mt-3">
           {(['review', 'grid'] as Tab[]).map(t => (

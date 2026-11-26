@@ -2,15 +2,26 @@
 
 :root {
   --pink: #f6a7d7;
+  color-scheme: light only;
+}
+
+html, body {
+  background-color: #fff !important;
+  color: #000 !important;
 }
 
 body {
-  background-color: #000;
-  color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+@media (prefers-color-scheme: dark) {
+  html, body {
+    background-color: #fff !important;
+    color: #000 !important;
+  }
+}
+
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #111; }
-::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-track { background: #f3f3f3; }
+::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--pink); }
