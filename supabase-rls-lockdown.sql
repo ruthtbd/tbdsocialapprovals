@@ -219,6 +219,12 @@ create policy "Admins can upload to posts bucket" on storage.objects
   for insert to authenticated
   with check (bucket_id = 'posts' and is_admin());
 
+-- UPDATE is needed because the app uses upsert:true for thumbnails and asset replaces.
+create policy "Admins can update posts bucket" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'posts' and is_admin())
+  with check (bucket_id = 'posts' and is_admin());
+
 create policy "Admins can delete from posts bucket" on storage.objects
   for delete to authenticated
   using (bucket_id = 'posts' and is_admin());
